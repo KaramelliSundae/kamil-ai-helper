@@ -3,6 +3,7 @@ name = "ai-ders"
 version = "0.1.0"
 description = "Personal study agent: watches Canvas and school mail, reminds, answers, drafts."
 readme = "README.md"
+license = "0BSD"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.162",

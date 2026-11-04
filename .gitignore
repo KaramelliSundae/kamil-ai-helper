@@ -16,4 +16,4 @@ mobile/google-services.json
 .DS_Store
 client_secret*.json
 deploy/.host
-PRIVATE.md
+PRIVATE*

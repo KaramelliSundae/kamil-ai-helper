@@ -6,9 +6,9 @@ drafts that only go out when you approve them. With a server it also reads your 
 
 The app's interface is in Turkish.
 
-> **Hızlı başlangıç (Türkçe):** APK'yı kur → Ayarlar → **Sadece telefon** → Canvas adresini, Canvas erişim
-> belirtecini ve (sohbet için) Gemini API anahtarını gir → **Kaydet ve başla** → bildirimlere izin ver.
-> Sunucu gerekmez. Ayrıntılar aşağıda.
+> **Hızlı başlangıç (Türkçe):** [Releases](../../releases) sayfasından APK'yı telefona indirip kur → Ayarlar →
+> **Sadece telefon** → Canvas adresini, Canvas erişim belirtecini ve (sohbet için) Gemini API anahtarını gir →
+> **Kaydet ve başla** → bildirimlere izin ver. Sunucu gerekmez. Ayrıntılar aşağıda.
 
 ## Two ways to run it
 
@@ -27,8 +27,11 @@ local model. The app has both, you choose in Settings.
 
 ## Phone only: setup
 
-1. **Install the app.** Build the APK (see [Android app](#android-app)) or get one from whoever built it,
-   and install it. Android asks you to allow installs from that source once.
+1. **Install the app.** Download the APK from [Releases](../../releases) on your phone and open it, or build
+   it yourself (see [Android app](#android-app)). Android asks you to allow installs from that source once.
+   Releases are signed with the certificate whose SHA-256 is
+   `ef01b7e855f42298fd59dd269842b0b2f72002e6f478607fbebf853af10d2800` (CN=Kamil); later releases use the same
+   key, so they install as updates.
 2. **Canvas access token.** In Canvas: *Account → Settings → Approved Integrations → New Access Token*.
    Give it a name and an expiry date, then copy the token. Kamil only ever reads with it.
 3. **Gemini API key (for chat).** Go to [Google AI Studio](https://aistudio.google.com), sign in, and choose
@@ -91,8 +94,10 @@ adb install -r android/app/build/outputs/apk/release/app-release.apk
 `build.sh` assumes Android Studio's paths (`~/android-studio/jbr`, `~/Android/Sdk`); set `JAVA_HOME` and
 `ANDROID_HOME` if yours differ. The APK holds both arm64 (phones) and x86_64 (emulators).
 
-The release build is signed with the build machine's debug key. Android only installs an update signed
-with the same key, so keep building on the same machine, or uninstall first.
+`build.sh` signs with React Native's debug key, which every React Native project shares: fine for your
+own phone, not for sharing, because a phone would then accept anyone's "update". To share a build, sign it
+with your own key: `mobile/sign-release.sh kamil.apk` creates one on first use (back it up). Android only
+installs an update signed with the same key as the installed app, so switching keys needs one uninstall.
 
 **Updates in server mode:** run `mobile/publish.sh` on the server after building there. Phones then show
 *Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256.
@@ -156,3 +161,8 @@ connections from your own computer (`inprocess` skips the mail sandbox, so use i
 | `mobile/src/phone/` | The phone-only backend: Canvas, storage, alarms, Gemini agent |
 | `tests/` | Server tests, including prompt-injection and sandbox tests |
 | `docs/` | Server guide and security design |
+
+## License
+
+[BSD Zero Clause](LICENSE): do whatever you want with it, no conditions, no attribution needed. It comes
+with no warranty: check your deadlines yourself too.
