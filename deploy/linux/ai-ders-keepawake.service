@@ -1,0 +1,12 @@
+# Optional (KEEP_AWAKE=yes in /etc/ai-ders/env): keeps a desktop or laptop server from sleeping,
+# so the watcher keeps running.
+[Unit]
+Description=AI Ders: keep this PC awake
+
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=sleep:idle:handle-lid-switch --who=ai-ders --why=watcher --mode=block /usr/bin/sleep infinity
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

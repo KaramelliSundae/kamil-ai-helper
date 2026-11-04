@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <path id="spark" d="M0,-100 C10,-25 25,-10 100,0 C25,10 10,25 0,100 C-10,25 -25,10 -100,0 C-25,-10 -10,-25 0,-100Z"/>
+  </defs>
+  <!-- Kept inside the adaptive icon's safe circle (radius 341 of 512), so a round mask never cuts it. -->
+  <g transform="translate(512 512) scale(0.9) translate(-512 -469)">
+    <path d="M282 430 V690 C390 672 470 688 512 722 C554 688 634 672 742 690 V430"
+          fill="none" stroke="#bfd0ff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#ffffff" stroke="#ffffff" stroke-width="16" stroke-linejoin="round">
+      <path d="M496 452 C446 414 375 402 302 412 V650 C375 640 446 652 496 690 Z"/>
+      <path d="M528 452 C578 414 649 402 722 412 V650 C649 640 578 652 528 690 Z"/>
+    </g>
+    <use xlink:href="#spark" transform="translate(512 300) scale(0.95)" fill="#ffc94d"/>
+    <use xlink:href="#spark" transform="translate(646 226) scale(0.36)" fill="#ffc94d"/>
+  </g>
+</svg>

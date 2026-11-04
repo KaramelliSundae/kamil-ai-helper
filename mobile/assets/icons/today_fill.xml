@@ -1,0 +1,3 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="960" android:viewportHeight="960">
+  <path android:fillColor="#FF000000" android:pathData="M284 621.82q-28 -28.19 -28 -69Q256 512 284.18 484q28.19 -28 69 -28Q394 456 422 484.18q28 28.19 28 69Q450 594 421.82 622q-28.19 28 -69 28Q312 650 284 621.82ZM180 880q-24 0 -42 -18t-18 -42v-620q0 -24 18 -42t42 -18h65v-28q0 -13.6 9 -22.8q9 -9.2 23.02 -9.2t23.5 9.2Q310 98.4 310 112v28h340v-28q0 -13.6 9 -22.8q9 -9.2 23.02 -9.2t23.5 9.2Q715 98.4 715 112v28h65q24 0 42 18t18 42v620q0 24 -18 42t-42 18H180Zm0 -60h600v-430H180v430Z"/>
+</vector>

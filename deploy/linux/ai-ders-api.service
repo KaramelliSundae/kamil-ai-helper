@@ -1,0 +1,56 @@
+[Unit]
+Description=AI Ders API for the phone
+Wants=network-online.target
+After=network-online.target tailscaled.service ai-ders-arbiter.service
+
+[Service]
+User=ai-ders
+Group=ai-ders
+StateDirectory=ai-ders
+StateDirectoryMode=0700
+EnvironmentFile=/etc/ai-ders/env
+Environment=PYTHONUNBUFFERED=1
+# The Canvas token stays out of here: the agent reads what the watcher already stored.
+LoadCredentialEncrypted=api_token:/etc/ai-ders/creds/api_token.cred
+LoadCredentialEncrypted=mail_password:/etc/ai-ders/creds/mail_password.cred
+ExecStart=/opt/ai-ders/.venv/bin/uvicorn --factory ai_ders.api:create_app --host ${API_HOST} --port 8420 --no-server-header
+Restart=always
+RestartSec=5
+
+Nice=5
+CPUWeight=50
+MemoryMax=512M
+PrivateDevices=yes
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+# Extra walls: no kernel, clock or other processes in view, no writable-executable memory, and only
+# ordinary service syscalls.
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+PrivateIPC=yes
+KeyringMode=private
+UMask=0077
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug @module @raw-io @reboot @swap @cpu-emulation @obsolete
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,35 @@
+[Unit]
+Description=AI Ders daily digest
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ai-ders
+Group=ai-ders
+StateDirectory=ai-ders
+StateDirectoryMode=0700
+EnvironmentFile=/etc/ai-ders/env
+Environment=PYTHONUNBUFFERED=1
+LoadCredentialEncrypted=mail_password:/etc/ai-ders/creds/mail_password.cred
+ExecStart=/opt/ai-ders/.venv/bin/ai-ders digest
+TimeoutStartSec=120
+
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+MemoryMax=256M
+PrivateDevices=yes
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=

@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Ders mail sandbox: one sandboxed parser per mail
+
+[Socket]
+ListenStream=/run/ai-ders-mailparse.sock
+# Only the ai-ders user (the watcher) may hand it a mail.
+SocketUser=ai-ders
+SocketGroup=ai-ders
+SocketMode=0600
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target
