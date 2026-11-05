@@ -1,9 +1,2 @@
-import type { ServerConnection } from './api';
-import type { SleepLines } from './kamil';
-
-/** Room for a build's own touches. This one has none. */
-export function ServerReport(_props: { connection: ServerConnection }) {
-  return null;
-}
-
-export const sleepLines: SleepLines | null = null;
+/** A build's own touches. What this build calls the program that comes first on the GPU, when there is one. */
+export const imageAppName = 'görsel uygulaması';

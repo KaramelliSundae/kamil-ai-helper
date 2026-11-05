@@ -13,6 +13,7 @@ import { api, Connection } from './api';
 import { chat } from './chatSession';
 import { timeLeft } from './format';
 import { CANVAS, KAMIL, STAGE } from './kamilart/sprites';
+import { imageAppName } from './personal';
 import type { Eye, RobotView, Sprite } from './kamilart/sprites';
 import type { GpuState, Upcoming } from './types';
 import { rounded } from './ui';
@@ -477,13 +478,11 @@ const FED_UP_TAPS = 4;
 const FED_UP_WINDOW_MS = 6000;
 const FED_UP_MS = 5000;
 
-/** A build can say these two its own way. */
-export type SleepLines = { image: string; job: string };
-
-function sleepLine(gpu: GpuState | null | undefined, lines?: SleepLines | null): string {
-  if (gpu?.gpuOwner === 'image') return lines?.image ?? 'GPU görsel üretimde patron, ben biraz uyuyorum. Dokunursanız kalkarım.';
+function sleepLine(gpu: GpuState | null | undefined): string {
+  const imageApp = imageAppName.charAt(0).toLocaleUpperCase('tr') + imageAppName.slice(1);
+  if (gpu?.gpuOwner === 'image') return `${imageApp} çalışıyor patron, ben biraz uyuyorum. Dokunursanız kalkarım.`;
   if (gpu?.mode === 'image') return 'GPU görsel üretime ayrıldı patron, ben uyuyorum. Dokunursanız kalkarım.';
-  if (gpu?.gpuOwner === 'job') return lines?.job ?? 'GPU bir işe verildi patron, ben biraz uyuyorum. Dokunursanız kalkarım.';
+  if (gpu?.gpuOwner === 'job') return "Aziz Bey GPU'yu işe verdi patron, ben biraz uyuyorum. Dokunursanız kalkarım.";
   if (gpu?.keepOffSeconds) return 'Yeni iş bekleniyormuş patron, uyuyorum. Dokunursanız kalkarım.';
   return 'Şu an uyuyorum patron. Dokunursanız kalkar, yine de kontrol ederim.';
 }
@@ -558,12 +557,11 @@ const SHORT_TAP_MS = 500;
  * on the board while this page reloads, then goes back to enter it all. What he says at the end comes from the real
  * result. When the model is off the GPU he goes home to sleep; the door turns to glass only while he sleeps.
  */
-export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, sleepLines, guest }: {
+export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, guest }: {
   connection: Connection;
   gpu?: GpuState | null;
   upcoming?: Upcoming[];
   onUpdated: () => Promise<unknown>;
-  sleepLines?: SleepLines | null;
   guest?: Guest | null;
 }) {
   const window = useWindowDimensions();
@@ -630,8 +628,6 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   upcomingNow.current = upcoming;
   const gpuNow = useRef(gpu);
   gpuNow.current = gpu;
-  const sleepLinesNow = useRef(sleepLines);
-  sleepLinesNow.current = sleepLines;
   const driveRef = useRef<() => void>(() => undefined);
 
   // Small steps the longer routines are made of
@@ -785,7 +781,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
 
   const greet = useCallback(async () => {
     if (where.current === 'bed') {
-      say(sleepLine(gpuNow.current, sleepLinesNow.current), 'house');
+      say(sleepLine(gpuNow.current), 'house');
       await hold(SLEEP_LINE_MS, () => wanted.current.check || !wanted.current.sleep);
       say('');
       return;

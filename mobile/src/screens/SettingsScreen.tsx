@@ -22,7 +22,7 @@ import { fillMaxSize, fillMaxWidth, height, padding, verticalScroll, weight } fr
 import { useEffect, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
-import { ServerReport } from '../personal';
+import { ServerReport } from '../aziz';
 import { ServerStatus } from '../ServerStatus';
 import { api, Connection, GeminiSettings, saveConnection, ServerConnection } from '../api';
 import { askForNotifications, notificationsAllowed, sendTestNotification } from '../background';

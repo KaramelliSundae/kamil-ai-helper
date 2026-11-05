@@ -129,7 +129,9 @@ is taking.
 
 If the local model shares its GPU with other work, [Aziz](https://github.com/KaramelliSundae/aziz-the-manager) can manage
 that: he decides who gets the GPU, runs heavy jobs in order, and brings the model back as soon as it is free. Set
-`GPU_GATE_URL` to his address and the app shows the server's state under **Ayarlar → Sunucu**. Kamil works without him.
+`GPU_GATE_URL` to his address and the app shows the server's state under **Ayarlar → Sunucu**, with Aziz himself at his desk
+beside his safe. Tap him and he goes to read Kamil's day off the chart. Kamil works without him, and without him the panel does
+not appear.
 
 ## Security
 
