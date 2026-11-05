@@ -549,6 +549,8 @@ export type Guest = {
 };
 
 const GUEST_HOLD_MS = 10000;
+const GUEST_HINT_MS = 3000; // from here the door trembles, so a finger on the house knows something is coming
+const SHORT_TAP_MS = 500;
 
 /**
  * Kamil's room on the main page, with his house on the left, his computer in the middle and his board on the right.
@@ -913,6 +915,41 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     driveRef.current();
   }, []);
 
+  // The hold on the house has its own timer. The long press Pressable offers gives up when a finger drifts ten points,
+  // and over ten seconds a real finger always does.
+  const tremble = useRef(new Animated.Value(0)).current;
+  const holdTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const trembling = useRef<Animated.CompositeAnimation | null>(null);
+  const holdStart = useRef(0);
+  const stopHold = useCallback(() => {
+    holdTimers.current.forEach(clearTimeout);
+    holdTimers.current = [];
+    trembling.current?.stop();
+    trembling.current = null;
+    tremble.setValue(0);
+  }, [tremble]);
+  const startHold = useCallback(() => {
+    stopHold();
+    holdStart.current = Date.now();
+    holdTimers.current = [
+      setTimeout(() => {
+        trembling.current = Animated.loop(Animated.sequence([
+          Animated.timing(tremble, { toValue: 1, duration: 70, useNativeDriver: true }),
+          Animated.timing(tremble, { toValue: -1, duration: 140, useNativeDriver: true }),
+          Animated.timing(tremble, { toValue: 0, duration: 70, useNativeDriver: true }),
+          Animated.delay(240),
+        ]));
+        trembling.current.start();
+      }, GUEST_HINT_MS),
+      setTimeout(() => {
+        holdStart.current = 0;
+        stopHold();
+        onHold();
+      }, GUEST_HOLD_MS),
+    ];
+  }, [onHold, stopHold, tremble]);
+  useEffect(() => stopHold, [stopHold]);
+
   /** One thing at a time: whatever is wanted next runs when the last one is done. */
   const drive = useCallback(async () => {
     if (running.current) return;
@@ -1063,7 +1100,10 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
               position: 'absolute', left: door.x * px, top: door.y * px, width: door.w * px, height: door.h * px,
               opacity: doorGlass.interpolate({ inputRange: [0, 1], outputRange: [1, 0.16] }),
               transformOrigin: [0, door.h * px / 2, 0],
-              transform: [{ scaleX: doorSwing.interpolate({ inputRange: [0, 1], outputRange: [1, 0.12] }) }],
+              transform: [
+                { translateX: tremble.interpolate({ inputRange: [-1, 1], outputRange: [-1.6, 1.6] }) },
+                { scaleX: doorSwing.interpolate({ inputRange: [0, 1], outputRange: [1, 0.12] }) },
+              ],
             } as unknown as AnimatedStyle}>
             <Image source={door.src} fadeDuration={0} style={{ width: door.w * px, height: door.h * px }} />
           </Animated.View>
@@ -1071,11 +1111,18 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
           {lying ? <Sleeping left={worldX(-3.1)} top={worldY(1.6, -1.7)} cycle={dream} /> : null}
           {guest ? <guest.Layer scale={scale} k={k} width={width} height={height} onReady={onGuestReady} /> : null}
           {guest ? (
-            // The house takes a tap like the rest of the room; only a very long press there means anything else.
+            // The house takes a quick tap like the rest of the room; a hold is the hidden way in. It keeps the finger, so the
+            // page cannot take it away by starting to scroll.
             <Pressable
-              onPress={onTap}
-              onLongPress={onHold}
-              delayLongPress={GUEST_HOLD_MS}
+              cancelable={false}
+              blockNativeResponder
+              pressRetentionOffset={{ top: 400, bottom: 400, left: 400, right: 400 }}
+              onPressIn={startHold}
+              onPressOut={() => {
+                const held = holdStart.current ? Date.now() - holdStart.current : Infinity;
+                stopHold();
+                if (held < SHORT_TAP_MS) onTap();
+              }}
               style={{ position: 'absolute', left: 0, top: worldY(3.6, -0.6), width: worldX(-1.55), bottom: 0 }}
             />
           ) : null}
