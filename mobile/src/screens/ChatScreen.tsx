@@ -29,7 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api, ChatMessage, ChatSetup, Connection, Conversation, ModelId } from '../api';
 import { chat, useChat } from '../chatSession';
-import { ChatGreeter, WaitingFigure } from '../personal';
+import { AnswerFigure, ChatGreeter, WaitingFigure } from '../personal';
 import { dative, formatDate } from '../format';
 import { icons } from '../icons';
 import { Notice, rounded } from '../ui';
@@ -214,6 +214,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
   const conversationId = session.conversationId;
   const messages = session.messages;
   const sending = session.waitingOn !== null;
+  const waitingLabel = session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…');
   const error = session.error;
   const text = session.draft;
 
@@ -333,7 +334,12 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
               data={[...messages].reverse()}
               keyExtractor={(message) => String(message.id)}
               contentContainerStyle={styles.list}
-              renderItem={({ item }) => <Message message={item} />}
+              renderItem={({ item, index }) => (
+                <>
+                  <Message message={item} />
+                  {AnswerFigure && index === 0 && !sending && item.role === 'assistant' ? <AnswerFigure /> : null}
+                </>
+              )}
             />
           </View>
         </RNHostView>
@@ -350,12 +356,16 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
                 </Text>
               </Row>
             ))}
-            <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-              {WaitingFigure ? <WaitingFigure /> : <LoadingIndicator />}
-              <Text color={colors.onSurfaceVariant} modifiers={[weight(1)]} style={{ typography: 'bodyMedium' }}>
-                {session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…')}
-              </Text>
-            </Row>
+            {WaitingFigure ? (
+              <WaitingFigure label={waitingLabel} />
+            ) : (
+              <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+                <LoadingIndicator />
+                <Text color={colors.onSurfaceVariant} modifiers={[weight(1)]} style={{ typography: 'bodyMedium' }}>
+                  {waitingLabel}
+                </Text>
+              </Row>
+            )}
           </Column>
         ) : null}
         {error ? <Notice tone="error">{error}</Notice> : null}

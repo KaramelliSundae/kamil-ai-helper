@@ -188,7 +188,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         <Header title="Bugün" subtitle={longDate(now)} />
         {error ? <Notice tone="error">{error}</Notice> : null}
         {taskError ? <Notice tone="error">{taskError}</Notice> : null}
-        <TodayKamil connection={connection} gpu={data?.gpu} onUpdated={refresh} />
+        <TodayKamil connection={connection} gpu={data?.gpu} upcoming={data?.upcoming} onUpdated={refresh} />
         {data ? <Summary upcoming={data.upcoming} gpu={data.gpu} now={now} /> : null}
         <UpdatePanel connection={connection} onlyWhenAvailable />
         {connection.mode === 'server' && data && sharesGpu(data.gpu) ? <ServerStatus connection={connection} /> : null}
