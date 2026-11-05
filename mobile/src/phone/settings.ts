@@ -5,6 +5,16 @@
 import * as SecureStore from 'expo-secure-store';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+/** Older than the newest models, so it would fall off a short list, but kept on offer for its generous limits. */
+export const GENEROUS_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const MODEL_CHOICES = 6;
+
+/** The models to offer as shortcuts, newest first, out of those the key may call. */
+export function modelChoices(models: string[]): string[] {
+  const newest = models.slice(0, MODEL_CHOICES);
+  if (!models.includes(GENEROUS_GEMINI_MODEL) || newest.includes(GENEROUS_GEMINI_MODEL)) return newest;
+  return [...newest.slice(0, MODEL_CHOICES - 1), GENEROUS_GEMINI_MODEL];
+}
 
 const KEYS = {
   canvasUrl: 'phone.canvasUrl',

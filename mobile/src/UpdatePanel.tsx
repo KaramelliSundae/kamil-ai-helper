@@ -7,7 +7,7 @@ import { Notice, Panel, ShapeIcon, shapes } from './ui';
 import { findUpdate, installedVersion, installUpdate } from './update';
 
 /** Checks for a newer app on mount. `onlyWhenAvailable` hides it until there is something to install. */
-export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Connection; onlyWhenAvailable?: boolean }) {
+export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Connection | null; onlyWhenAvailable?: boolean }) {
   const colors = useMaterialColors();
   const [release, setRelease] = useState<Release | null>(null);
   const [busy, setBusy] = useState(false);

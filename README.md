@@ -41,7 +41,7 @@ local model. The app has both, you choose in Settings.
    - *Canvas erişim belirteci*: the token from step 2
    - *Gemini API anahtarı*: the key from step 3
    - *Gemini modeli*: `gemini-3.8-flash` by default; after saving, the app lists the Flash models your
-     key can use
+     key can use, including `gemini-3.5-flash-lite`
 5. Tap **Kaydet ve başla**. Kamil checks the token with Canvas and the key with Google before it saves
    anything, then reads your courses once without notifying you about what is already there.
 6. Tap **Bildirimlere izin ver**. From now on new assignments, changed due dates, grades and announcements
@@ -101,6 +101,21 @@ installs an update signed with the same key as the installed app, so switching k
 
 **Updates in server mode:** run `mobile/publish.sh` on the server after building there. Phones then show
 *Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256.
+
+**Updates from GitHub:** with no server, or a server that publishes no APK, **Ayarlar → Uygulama** checks this
+repository's [Releases](../../releases), and **Bugün** shows *Yeni sürüm hazır* when there is one. The download is checked
+against its SHA-256, and Android only installs it over an app signed with the same key, so this works for the signed
+release builds. A build you signed yourself updates from your own server. Publishing means two files on a release:
+`kamil.apk` and `latest.json` (`versionCode`, `versionName`, `sha256`, `size`). A fork changes the address in
+`mobile/src/update.ts`.
+
+## Kamil
+
+Kamil is a butler who lives on **Bugün**: his house on the left, his computer in the middle, his board on the right. He
+comes out when the app opens, says hello and goes back to work. Tap him and he turns to you, then really checks Canvas
+and mail at the computer, writes your nearest deadlines on the board, and tells you what he found. While the local model
+is off the GPU he sleeps in his house, behind a door that turns to glass. In **Sohbet** he paces up and down while an answer
+is on its way and says each step as it starts. Tap him too many times and he will tell you what he thinks of that.
 
 ## Notifications and chat
 

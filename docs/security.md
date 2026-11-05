@@ -77,6 +77,13 @@ planted, no reminder is set, and its draft arrives with all three warnings.
 fixed labels chosen by tool name. No text from a mail or from the model's arguments reaches them, so a
 hostile text cannot write its own status on the screen.
 
+## App updates
+
+The app updates only from your own server or from this project's GitHub Releases, and only when you tap. It compares
+version numbers, downloads the APK, checks its SHA-256, and hands it to Android's installer. Android asks you to confirm
+and refuses any APK not signed with the key of the installed app, so a tampered download or a stranger's build cannot
+replace it. The check sends GitHub nothing about you beyond the request itself.
+
 ## The other server services
 
 The model server (with a local model), the API and the watcher run with extra systemd hardening as well:

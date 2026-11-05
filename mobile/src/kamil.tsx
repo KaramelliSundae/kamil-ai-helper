@@ -1,0 +1,1221 @@
+/**
+ * Kamil, the butler who lives on the main page and in the chat. He is a set of 3D drawings, one sprite per part, moved
+ * by the native animation driver. The top of his head is hinged at the back and opens like a puppet's while the text
+ * types out; his legs are stiff cones that swivel from the hip. Every sentence he says is fixed, chosen from a real
+ * result, with no model behind it.
+ */
+import { RNHostView, Surface, Text, useMaterialColors } from '@expo/ui/jetpack-compose';
+import { padding, size, weight } from '@expo/ui/jetpack-compose/modifiers';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, AppState, Easing, Image, Pressable, StyleSheet, Text as RNText, useWindowDimensions, View } from 'react-native';
+
+import { api, Connection } from './api';
+import { chat } from './chatSession';
+import { timeLeft } from './format';
+import { CANVAS, KAMIL, STAGE } from './kamilart/sprites';
+import type { Eye, RobotView, Sprite } from './kamilart/sprites';
+import type { GpuState, Upcoming } from './types';
+import { rounded } from './ui';
+
+export type Mood = 'happy' | 'busy' | 'worried' | 'asleep';
+
+/** Kamil seen from the front, for places where he only stands. */
+export const KAMIL_FRONT = KAMIL.slice(0, 1);
+
+const PAUSE = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const WALK_MS = 620;
+const STEP_ANGLE = 27; // the legs are stiff cones that swivel from the hip, with no knees
+const TURN_STEP_MS = 75;
+const LEG_LENGTH = 0.9;
+const SIT_DROP = 0.24;
+const Y20 = 0;
+const Y55 = 1;
+const Y90 = 2;
+const Y135 = 3;
+const Y180 = 4;
+
+type AnimatedStyle = React.ComponentProps<typeof Animated.View>['style'];
+
+type Rig = {
+  view: Animated.Value;
+  flip: Animated.Value;
+  walk: Animated.Value;
+  sit: Animated.Value;
+  jaw: Animated.Value;
+  blink: Animated.Value;
+  gazeX: Animated.Value;
+  gazeY: Animated.Value;
+  idle: Animated.Value;
+  typing: Animated.Value;
+  armUp: Animated.Value;
+  scribble: Animated.Value;
+};
+
+function makeRig(view = 0): Rig {
+  const value = (start = 0) => new Animated.Value(start);
+  return {
+    view: value(view), flip: value(1), walk: value(), sit: value(), jaw: value(), blink: value(), gazeX: value(), gazeY: value(),
+    idle: value(), typing: value(), armUp: value(), scribble: value(),
+  };
+}
+
+function useRig(view = 0): Rig {
+  const holder = useRef<Rig | null>(null);
+  if (!holder.current) holder.current = makeRig(view);
+  return holder.current;
+}
+
+function useLoop(value: Animated.Value, duration: number, enabled = true) {
+  useEffect(() => {
+    if (!enabled) {
+      value.setValue(0);
+      return;
+    }
+    const run = Animated.loop(Animated.timing(value, { toValue: 1, duration, easing: Easing.linear, useNativeDriver: true }));
+    run.start();
+    return () => run.stop();
+  }, [duration, enabled, value]);
+}
+
+/** Turns through the drawn sides, changing to the mirrored ones only at the front or back, where it does not show. */
+async function turnRobot(rig: Rig, facing: { current: number }, flipped: { current: boolean }, target: number, flip: boolean, live: () => boolean) {
+  const turnTo = async (view: number) => {
+    while (live() && facing.current !== view) {
+      facing.current += facing.current < view ? 1 : -1;
+      rig.view.setValue(facing.current);
+      await PAUSE(TURN_STEP_MS);
+    }
+  };
+  if (flipped.current !== flip) {
+    const viaFront = facing.current + target <= (Y180 - facing.current) + (Y180 - target);
+    await turnTo(viaFront ? Y20 : Y180);
+    flipped.current = flip;
+    rig.flip.setValue(flip ? -1 : 1);
+  }
+  await turnTo(target);
+}
+
+/** Blinks now and then, and the small quick glances that make them look alive. */
+function useLife(rig: Rig, awake: boolean) {
+  useEffect(() => {
+    if (!awake) return;
+    const blink = Animated.loop(Animated.sequence([
+      Animated.delay(2900),
+      Animated.timing(rig.blink, { toValue: 1, duration: 35, useNativeDriver: true }),
+      Animated.delay(70),
+      Animated.timing(rig.blink, { toValue: 0, duration: 35, useNativeDriver: true }),
+    ]));
+    blink.start();
+    let timer: ReturnType<typeof setTimeout>;
+    const glance = () => {
+      Animated.parallel([
+        Animated.timing(rig.gazeX, { toValue: Math.random() * 2 - 1, duration: 80, useNativeDriver: true }),
+        Animated.timing(rig.gazeY, { toValue: Math.random() - 0.5, duration: 80, useNativeDriver: true }),
+      ]).start();
+      timer = setTimeout(glance, 1400 + Math.random() * 2600);
+    };
+    timer = setTimeout(glance, 800);
+    return () => {
+      blink.stop();
+      clearTimeout(timer);
+      rig.blink.setValue(0);
+    };
+  }, [awake, rig]);
+}
+
+function Piece({ sprite, k }: { sprite: Sprite; k: number }) {
+  return (
+    <Image
+      source={sprite.src}
+      fadeDuration={0}
+      style={{ position: 'absolute', left: sprite.x * k, top: sprite.y * k, width: sprite.w * k, height: sprite.h * k }}
+    />
+  );
+}
+
+/** The whole canvas, turning around one point of it. Every sprite of a robot shares the same canvas. */
+function Pivot({ k, at, transform, opacity, children }: {
+  k: number;
+  at?: number[];
+  transform?: unknown[];
+  opacity?: unknown;
+  children: React.ReactNode;
+}) {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute', left: 0, top: 0, width: CANVAS.w * k, height: CANVAS.h * k, opacity,
+        transformOrigin: at ? [at[0] * k, at[1] * k, 0] : undefined,
+        transform,
+      } as unknown as AnimatedStyle}>
+      {children}
+    </Animated.View>
+  );
+}
+
+function Pupils({ eyes, rig, k }: { eyes: Eye[]; rig: Rig; k: number }) {
+  return (
+    <>
+      {eyes.map((eye) => {
+        const r = eye.r * 0.22 * k;
+        const reach = eye.r * 0.2 * k;
+        return (
+          <Animated.View
+            key={eye.x}
+            style={{
+              position: 'absolute', left: eye.x * k - r, top: eye.y * k - r, width: r * 2, height: r * 2, borderRadius: r,
+              backgroundColor: '#08070a',
+              transform: [
+                { translateX: rig.gazeX.interpolate({ inputRange: [-1, 1], outputRange: [-reach, reach] }) },
+                { translateY: rig.gazeY.interpolate({ inputRange: [-1, 1], outputRange: [-reach, reach] }) },
+                { scaleX: eye.sx },
+              ],
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/** The upper head, one finished drawing for each mouth level. A level shows only while the jaw is near it. */
+function Head({ view, rig, k, mood }: { view: RobotView; rig: Rig; k: number; mood: Mood }) {
+  const levels = view.head.length;
+  const closedEyes = mood === 'asleep';
+  const worried = mood === 'worried' && view.worried;
+  // Talking is a whole-body affair: the head bounces up with each syllable, the way a puppet's does.
+  const bounce = rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.07 * CANVAS.unit * k] });
+  const tilt = rig.jaw.interpolate({ inputRange: [0, 1, 2, 3], outputRange: ['0deg', '-1.5deg', '1.5deg', '-2.5deg'] });
+  return (
+    <Pivot k={k} at={view.pivots.neck} transform={[{ translateY: bounce }, { rotate: tilt }]}>
+      {view.head.map((sprite, level) => (
+        <Pivot
+          key={sprite.src}
+          k={k}
+          opacity={levels === 1 ? 1 : rig.jaw.interpolate({
+            inputRange: [level - 0.51, level - 0.5, level + 0.49, level + 0.5],
+            outputRange: [0, 1, 1, 0],
+            extrapolate: 'clamp',
+          })}>
+          {level === 0 && worried ? <Piece sprite={view.worried!} k={k} /> : <Piece sprite={sprite} k={k} />}
+          {closedEyes ? null : <Pupils eyes={level === 0 && worried ? view.worriedEyes ?? [] : view.eyes[level]} rig={rig} k={k} />}
+          {level === 0 && view.shut ? (
+            <Pivot k={k} opacity={closedEyes ? 1 : rig.blink}>
+              <Piece sprite={view.shut} k={k} />
+            </Pivot>
+          ) : null}
+        </Pivot>
+      ))}
+    </Pivot>
+  );
+}
+
+/** A robot seen from one side. Its parts are stacked so that the nearest is drawn last. */
+function OneView({ view, index, rig, k, mood, lying }: {
+  view: RobotView;
+  index: number;
+  rig: Rig;
+  k: number;
+  mood: Mood;
+  lying?: boolean;
+}) {
+  const unit = CANVAS.unit * k;
+  const swing = (amount: number) => rig.walk.interpolate({
+    inputRange: [0, 0.25, 0.5, 0.75, 1],
+    outputRange: ['0deg', `${amount}deg`, '0deg', `${-amount}deg`, '0deg'],
+  });
+  const sitStep = rig.sit.interpolate({ inputRange: [0, 0.49, 0.5, 1], outputRange: [0, 0, 1, 1] });
+  const standStep = rig.sit.interpolate({ inputRange: [0, 0.49, 0.5, 1], outputRange: [1, 1, 0, 0] });
+  const drop = rig.sit.interpolate({ inputRange: [0, 1], outputRange: [0, SIT_DROP * unit] });
+  // Arms work against the legs. While typing they peck in turn; the near one can lift to write on the board.
+  const tap = (phase: number) => rig.typing.interpolate({
+    inputRange: [0, 0.25, 0.5, 0.75, 1],
+    outputRange: ['0deg', `${5 * phase}deg`, '0deg', `${-5 * phase}deg`, '0deg'],
+  });
+  const lift = rig.armUp.interpolate({ inputRange: [0, 1], outputRange: ['0deg', index === Y20 ? '112deg' : '-122deg'] });
+  const scribble = rig.scribble.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '9deg', '-5deg', '11deg', '0deg'] });
+  const armA = <Pivot k={k} at={view.pivots.armA} transform={[{ rotate: swing(-20) }]} opacity={view.armAForward ? standStep : 1}><Piece sprite={view.armA} k={k} /></Pivot>;
+  const armB = (
+    <Pivot k={k} at={view.pivots.armB} transform={[{ rotate: swing(20) }, { rotate: lift }, { rotate: scribble }]} opacity={view.armBForward ? standStep : 1}>
+      <Piece sprite={view.armB} k={k} />
+    </Pivot>
+  );
+  const typingArms = view.armAForward && view.armBForward ? (
+    <>
+      <Pivot k={k} at={view.pivots.armA} transform={[{ rotate: tap(1) }]} opacity={sitStep}><Piece sprite={view.armAForward} k={k} /></Pivot>
+      <Pivot k={k} at={view.pivots.armB} transform={[{ rotate: tap(-1) }]} opacity={sitStep}><Piece sprite={view.armBForward} k={k} /></Pivot>
+    </>
+  ) : null;
+  const legs = view.legA && view.legB && !lying ? (
+    <>
+      <Pivot k={k} at={view.pivots.legA} transform={[{ rotate: swing(STEP_ANGLE) }]} opacity={standStep}><Piece sprite={view.legA} k={k} /></Pivot>
+      <Pivot k={k} at={view.pivots.legB} transform={[{ rotate: swing(-STEP_ANGLE) }]} opacity={standStep}><Piece sprite={view.legB} k={k} /></Pivot>
+    </>
+  ) : <Pivot k={k} opacity={standStep}><Piece sprite={view.legs} k={k} /></Pivot>;
+  const sitLegs = view.sitLegs ? <Pivot k={k} opacity={sitStep}><Piece sprite={view.sitLegs} k={k} /></Pivot> : null;
+  const nearArmOverHead = index >= Y55 && index <= Y135;
+  // The head lags behind the body at each step, which makes the stiff walk funny.
+  const headLag = rig.walk.interpolate({
+    inputRange: [0, 0.25, 0.5, 0.75, 1],
+    outputRange: ['0deg', '-4deg', '0deg', '3deg', '0deg'],
+  });
+  const breath = rig.idle.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['-1.1deg', '1.1deg', '-1.1deg'],
+  });
+  const typeNod = rig.typing.interpolate({ inputRange: [0, 0.5, 1], outputRange: ['0deg', '1deg', '0deg'] });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute', left: 0, top: 0, width: CANVAS.w * k, height: CANVAS.h * k,
+        opacity: rig.view.interpolate({
+          inputRange: [index - 0.51, index - 0.5, index + 0.49, index + 0.5],
+          outputRange: [0, 1, 1, 0],
+          extrapolate: 'clamp',
+        }),
+      }}>
+      {legs}
+      {sitLegs}
+      <Pivot k={k} transform={[{ translateY: drop }]}>
+        {armA}
+        {index === Y180 ? armB : null}
+        {typingArms}
+        <Piece sprite={view.body} k={k} />
+        {index === Y20 ? armB : null}
+        <Pivot k={k} at={view.pivots.hinge} transform={[{ rotate: headLag }, { rotate: breath }, { rotate: typeNod }]}>
+          <Head view={view} rig={rig} k={k} mood={mood} />
+        </Pivot>
+        {nearArmOverHead ? armB : null}
+      </Pivot>
+    </Animated.View>
+  );
+}
+
+/** The robot standing on one spot of the canvas; the canvas's ground point is at (0, 0) of its parent. */
+function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Rig; k: number; mood: Mood; lying?: boolean }) {
+  // A stiff-legged walk drops the body when the legs are apart, and rocks it from side to side.
+  const unit = CANVAS.unit * k;
+  const low = LEG_LENGTH * (1 - Math.cos(STEP_ANGLE * Math.PI / 180)) * unit;
+  const bob = rig.walk.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [0, low, 0, low, 0] });
+  const rock = rig.walk.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '5deg', '0deg', '-5deg', '0deg'] });
+  const hop = rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.03 * unit] });
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute', left: -CANVAS.ox * k, top: -CANVAS.oy * k, width: CANVAS.w * k, height: CANVAS.h * k,
+        transformOrigin: [CANVAS.ox * k, CANVAS.oy * k, 0],
+        transform: [{ scaleX: rig.flip }, { translateY: bob }, { translateY: hop }, { rotate: rock }],
+      } as unknown as AnimatedStyle}>
+      {views.map((view, index) => <OneView key={view.yaw} view={view} index={index} rig={rig} k={k} mood={mood} lying={lying} />)}
+    </Animated.View>
+  );
+}
+
+const WORRY_SHAKE: Record<Mood, number> = { happy: 2600, busy: 1100, worried: 420, asleep: 4800 };
+
+/** A robot on its own. */
+export function Figure({ views, mood, dp, text }: {
+  views: RobotView[];
+  mood: Mood;
+  dp: number;
+  text?: string;
+}) {
+  const rig = useRig();
+  useLife(rig, mood !== 'asleep');
+  useLoop(rig.idle, WORRY_SHAKE[mood]);
+  useFlap(text ?? '', rig.jaw);
+  const height = dp * 1.08;
+  const k = height / (2.92 * CANVAS.unit);
+  return (
+    <RNHostView modifiers={[size(dp, height)]}>
+      <View style={styles.host}>
+        <View style={{ position: 'absolute', left: dp / 2, top: height - 0.08 * CANVAS.unit * k, width: dp, height }}>
+          <Image source={STAGE.shadow} fadeDuration={0} style={{ position: 'absolute', left: -0.62 * CANVAS.unit * k, top: -0.2 * CANVAS.unit * k, width: 1.24 * CANVAS.unit * k, height: 0.42 * CANVAS.unit * k }} />
+          <RobotBody views={views} rig={rig} k={k} mood={mood} />
+        </View>
+      </View>
+    </RNHostView>
+  );
+}
+
+const TYPE_MS = 40;
+const FLAP_MS = 88;
+
+/** The text comes out a little at a time. A repeat of the same text stays put. */
+export function useSpoken(text: string): { shown: string; talking: boolean } {
+  const [shown, setShown] = useState('');
+  useEffect(() => {
+    let length = 0;
+    setShown('');
+    if (!text) return;
+    const ticker = setInterval(() => {
+      length += 2;
+      setShown(text.slice(0, length));
+      if (length >= text.length) clearInterval(ticker);
+    }, TYPE_MS);
+    return () => clearInterval(ticker);
+  }, [text]);
+  return { shown, talking: shown.length < text.length };
+}
+
+/** How far the mouth opens for each letter: wide for vowels, a little for consonants, shut between words. */
+export function mouthFor(letter: string | undefined, dice: number): number {
+  if (!letter || /[\s.,!?:;"'()-]/.test(letter)) return 0;
+  if (/[aeıioöuüAEIİOÖUÜ]/.test(letter)) return dice > 0.45 ? 3 : 2;
+  return dice > 0.8 ? 2 : 1;
+}
+
+/** Flaps the jaw along with the text. It goes by the letters, so it pauses between words like a real mouth. */
+function useFlap(text: string, jaw: Animated.Value) {
+  useEffect(() => {
+    if (!text) {
+      Animated.timing(jaw, { toValue: 0, duration: 60, useNativeDriver: true }).start();
+      return;
+    }
+    let at = 0;
+    const ticker = setInterval(() => {
+      if (at >= text.length) {
+        clearInterval(ticker);
+        Animated.timing(jaw, { toValue: 0, duration: 70, useNativeDriver: true }).start();
+        return;
+      }
+      Animated.timing(jaw, { toValue: mouthFor(text[at], Math.random()), duration: 45, useNativeDriver: true }).start();
+      at += Math.round(FLAP_MS / TYPE_MS) * 2;
+    }, FLAP_MS);
+    return () => {
+      clearInterval(ticker);
+      jaw.setValue(0);
+    };
+  }, [jaw, text]);
+}
+
+export function Bubble({ text }: { text: string }) {
+  const colors = useMaterialColors();
+  return (
+    <Surface color={colors.secondaryContainer} contentColor={colors.onSecondaryContainer} shape={rounded(20)} modifiers={[weight(1)]}>
+      <Text modifiers={[padding(14, 12, 14, 12)]} style={{ typography: 'bodyMedium' }}>
+        {text || ' '}
+      </Text>
+    </Surface>
+  );
+}
+
+function isAsleep(gpu: GpuState | null | undefined): boolean {
+  if (!gpu || gpu.mode === 'phone' || gpu.llmActive) return false;
+  return !!gpu.blocked || !!gpu.keepOffSeconds || gpu.gpuOwner === 'job' || gpu.gpuOwner === 'image' || gpu.mode === 'image';
+}
+
+const GREETING = 'Merhaba patron, kontrol yapmaya hazırım.';
+const TAP_LINE = 'Emredersiniz patron, hemen bakıyorum.';
+const FED_UP_LINE = 'Yav patron, adamı hasta etme. Bak yapıyoruz işte, az sabırlı ol amına koyim.';
+const FED_UP_TAPS = 4;
+const FED_UP_WINDOW_MS = 6000;
+const FED_UP_MS = 5000;
+
+/** A build can say these two its own way. */
+export type SleepLines = { image: string; job: string };
+
+function sleepLine(gpu: GpuState | null | undefined, lines?: SleepLines | null): string {
+  if (gpu?.gpuOwner === 'image') return lines?.image ?? 'GPU görsel üretimde patron, ben biraz uyuyorum. Dokunursanız kalkarım.';
+  if (gpu?.mode === 'image') return 'GPU görsel üretime ayrıldı patron, ben uyuyorum. Dokunursanız kalkarım.';
+  if (gpu?.gpuOwner === 'job') return lines?.job ?? 'GPU bir işe verildi patron, ben biraz uyuyorum. Dokunursanız kalkarım.';
+  if (gpu?.keepOffSeconds) return 'Yeni iş bekleniyormuş patron, uyuyorum. Dokunursanız kalkarım.';
+  return 'Şu an uyuyorum patron. Dokunursanız kalkar, yine de kontrol ederim.';
+}
+
+function shortTime(iso: string, now: number): string {
+  return timeLeft(iso, now).replace(' kaldı', '').replace(' saat', ' sa').replace(' gün', ' gün');
+}
+
+/** What goes on the board: the nearest deadlines, as a plan. */
+export function boardLines(upcoming: Upcoming[] | undefined, now: number): string[] {
+  const next = (upcoming ?? []).slice(0, 3).map((item) => {
+    const course = (item.course || item.title).split(/[\s(-]/)[0].slice(0, 9);
+    return `${course}: ${shortTime(item.dueAt, now)}`;
+  });
+  return next.length ? ['PLAN', ...next] : ['PLAN', 'Şimdilik', 'boş :)'];
+}
+
+// Remembered between visits to this page, so he does not walk out of the house again each time.
+let introDone = false;
+let lastBoard: string[] = [];
+
+const TAP_LINE_MS = 2300;
+const LOOK_MS = 2400;
+const SAVE_MS = 2200;
+const GREET_HOLD_MS = 6000;
+const RESULT_MS = 8000;
+const SLEEP_LINE_MS = 7000;
+const GPU_POLL_MS = 20000;
+
+// Where things are, in the room's own coordinates
+const ROOM_WIDTH_U = 8;
+const SPOT = {
+  bedside: { x: -2.75, z: -1.3 },
+  housefront: { x: -2.75, z: 0.25 },
+  seat: { x: -0.15, z: 0.05 },
+  board: { x: 1.6, z: -0.9 },
+};
+const SCREEN_RECT = { x0: -0.55, x1: 1.05, y0: 1.46, y1: 2.46, z: -1.38 };
+const BOARD_RECT = { x0: 2.3, x1: 3.84, y0: 1.2, y1: 3.0, z: -2.27 };
+
+/**
+ * Kamil's room on the main page, with his house on the left, his computer in the middle and his board on the right.
+ * Tapping really checks: he looks at the computer while Canvas and mail are checked, writes the nearest deadlines
+ * on the board while this page reloads, then goes back to enter it all. What he says at the end comes from the real
+ * result. When the model is off the GPU he goes home to sleep; the door turns to glass only while he sleeps.
+ */
+export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, sleepLines }: {
+  connection: Connection;
+  gpu?: GpuState | null;
+  upcoming?: Upcoming[];
+  onUpdated: () => Promise<unknown>;
+  sleepLines?: SleepLines | null;
+}) {
+  const window = useWindowDimensions();
+  const width = window.width - 32;
+  const scale = width / ROOM_WIDTH_U; // dp for one unit of the room
+  const height = width * (STAGE.h / STAGE.w);
+  const k = scale / CANVAS.unit;
+  const place = useCallback((spot: { x: number; z: number }) => {
+    const sin = Math.sin(STAGE.elev);
+    const pxPerU = STAGE.unit;
+    const u = STAGE.ox / pxPerU;
+    const top = STAGE.oy / pxPerU;
+    return { x: (spot.x + u) * scale, y: (top + spot.z * sin) * scale };
+  }, [scale]);
+
+  const [polled, setPolled] = useState<GpuState | undefined>();
+  useEffect(() => setPolled(undefined), [gpuProp]);
+  useEffect(() => {
+    if (connection.mode !== 'server') return;
+    let live = true;
+    const ticker = setInterval(() => {
+      api.gpu(connection).then((next) => { if (live) setPolled(next); }, () => undefined);
+    }, GPU_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(ticker);
+    };
+  }, [connection]);
+  const gpu = polled ?? gpuProp;
+
+  const rig = useRig(Y180);
+  const posX = useRef(new Animated.Value(place(SPOT.seat).x)).current;
+  const posY = useRef(new Animated.Value(place(SPOT.seat).y)).current;
+  const spotNow = useRef(place(SPOT.seat));
+  const doorSwing = useRef(new Animated.Value(0)).current; // 0 shut, 1 open
+  const doorGlass = useRef(new Animated.Value(0)).current; // 0 solid, 1 see-through
+  const screenScroll = useRef(new Animated.Value(0)).current;
+  const dream = useRef(new Animated.Value(0)).current;
+  const [lying, setLying] = useState(false);
+  const [saying, setSaying] = useState('');
+  const [bubbleAt, setBubbleAt] = useState<'seat' | 'board' | 'house'>('seat');
+  const [screen, setScreen] = useState<'off' | 'mail' | 'check' | 'save'>('mail');
+  const [board, setBoard] = useState<string[]>(lastBoard);
+  const [typing, setTyping] = useState(true);
+  const [scribbling, setScribbling] = useState(false);
+  const { shown } = useSpoken(saying);
+  useFlap(saying, rig.jaw);
+  useLife(rig, !lying);
+  useLoop(rig.idle, 2800);
+  useLoop(rig.typing, 420, typing);
+  useLoop(rig.scribble, 520, scribbling);
+  useLoop(dream, 2600, lying);
+  useLoop(screenScroll, screen === 'check' ? 1100 : 7000, screen !== 'off' && screen !== 'save');
+
+  const alive = useRef(true);
+  const where = useRef<'house' | 'bed' | 'seat' | 'board'>('seat');
+  const facing = useRef(Y180);
+  const flipped = useRef(false);
+  const running = useRef(false);
+  const checking = useRef(false);
+  const wanted = useRef({ check: false, greet: false, sleep: isAsleep(gpu), known: gpu !== undefined });
+  const upcomingNow = useRef(upcoming);
+  upcomingNow.current = upcoming;
+  const gpuNow = useRef(gpu);
+  gpuNow.current = gpu;
+  const sleepLinesNow = useRef(sleepLines);
+  sleepLinesNow.current = sleepLines;
+  const driveRef = useRef<() => void>(() => undefined);
+
+  // Small steps the longer routines are made of
+  const animate = useCallback((animation: Animated.CompositeAnimation) => new Promise<void>((resolve) => {
+    animation.start(() => resolve());
+  }), []);
+  const hold = useCallback(async (ms: number, stop?: () => boolean) => {
+    const until = Date.now() + ms;
+    while (alive.current && Date.now() < until && !stop?.()) await PAUSE(Math.min(120, until - Date.now()));
+  }, []);
+  const moving = useRef(0);
+  const whileMoving = useCallback(async (work: () => Promise<unknown>) => {
+    moving.current += 1;
+    try {
+      await work();
+    } finally {
+      moving.current -= 1;
+    }
+  }, []);
+  const face = useCallback((target: number, flip = false) => (
+    whileMoving(() => turnRobot(rig, facing, flipped, target, flip, () => alive.current))
+  ), [rig, whileMoving]);
+  const walkTo = useCallback(async (spot: { x: number; z: number }, face_: number, flip: boolean, unitsPerSecond = 1.45) => {
+    await whileMoving(async () => {
+      const target = place(spot);
+      const distance = Math.hypot(target.x - spotNow.current.x, target.y - spotNow.current.y) / scale;
+      spotNow.current = target;
+      await face(face_, flip);
+      const steps = Animated.loop(Animated.timing(rig.walk, { toValue: 1, duration: WALK_MS, easing: Easing.linear, useNativeDriver: true }));
+      steps.start();
+      await animate(Animated.parallel([
+        Animated.timing(posX, { toValue: target.x, duration: distance / unitsPerSecond * 1000, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(posY, { toValue: target.y, duration: distance / unitsPerSecond * 1000, easing: Easing.linear, useNativeDriver: true }),
+      ]));
+      steps.stop();
+      rig.walk.setValue(0);
+    });
+  }, [animate, face, place, posX, posY, rig, scale, whileMoving]);
+  const sitDown = useCallback(async () => {
+    await whileMoving(() => animate(Animated.timing(rig.sit, { toValue: 1, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true })));
+    setTyping(true);
+  }, [animate, rig, whileMoving]);
+  const standUp = useCallback(async () => {
+    setTyping(false);
+    await whileMoving(() => animate(Animated.timing(rig.sit, { toValue: 0, duration: 240, easing: Easing.out(Easing.quad), useNativeDriver: true })));
+  }, [animate, rig, whileMoving]);
+  const say = useCallback((line: string, at: 'seat' | 'board' | 'house' = 'seat') => {
+    setBubbleAt(at);
+    setSaying(line);
+  }, []);
+
+  // Tapped too many times: he stops, turns to the boss and lets him know, then carries on where he was.
+  const lineNow = useRef({ line: '', at: 'seat' as 'seat' | 'board' | 'house' });
+  lineNow.current = { line: saying, at: bubbleAt };
+  const typingNow = useRef(typing);
+  typingNow.current = typing;
+  const scribblingNow = useRef(scribbling);
+  scribblingNow.current = scribbling;
+  const armIsUp = useRef(false);
+  const tapTimes = useRef<number[]>([]);
+  const fedUpWanted = useRef(false);
+  const fedUpRunning = useRef<Promise<void> | null>(null);
+  const liftArm = useCallback((toValue: number) => (
+    animate(Animated.timing(rig.armUp, { toValue, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }))
+  ), [animate, rig]);
+  const fedUp = useCallback(() => {
+    fedUpWanted.current = false;
+    const run = async () => {
+      const before = { ...lineNow.current, typing: typingNow.current, scribbling: scribblingNow.current, arm: armIsUp.current };
+      if (where.current === 'bed' || where.current === 'house') {
+        // He answers from his bed, without getting up for it.
+        say(FED_UP_LINE, 'house');
+        await PAUSE(FED_UP_MS);
+        say(before.line, before.at);
+        return;
+      }
+      const view = facing.current;
+      const flip = flipped.current;
+      const turn = (target: number, side: boolean) => turnRobot(rig, facing, flipped, target, side, () => alive.current);
+      setTyping(false);
+      setScribbling(false);
+      if (before.arm) await liftArm(0);
+      await turn(Y20, false);
+      say(FED_UP_LINE, before.at);
+      setScribbling(true);
+      await liftArm(0.8);
+      await PAUSE(FED_UP_MS);
+      setScribbling(false);
+      await liftArm(0);
+      say(before.line, before.at);
+      await turn(view, flip);
+      if (before.arm) await liftArm(1);
+      setTyping(before.typing);
+      setScribbling(before.scribbling);
+    };
+    fedUpRunning.current = run().finally(() => { fedUpRunning.current = null; });
+    return fedUpRunning.current;
+  }, [liftArm, rig, say]);
+  /** Waits out his complaint, or has it now if it is due. The routines call this before each thing they show. */
+  const settle = useCallback(async () => {
+    while (alive.current) {
+      if (fedUpRunning.current) await fedUpRunning.current;
+      else if (fedUpWanted.current) await fedUp();
+      else return;
+    }
+  }, [fedUp]);
+
+  // Moving between the places
+  const leaveHouse = useCallback(async () => {
+    moving.current += 1;
+    setLying(false);
+    setScreen('mail');
+    rig.view.setValue(Y20);
+    facing.current = Y20;
+    flipped.current = false;
+    rig.flip.setValue(1);
+    const inside = place(SPOT.bedside);
+    spotNow.current = inside;
+    posX.setValue(inside.x);
+    posY.setValue(inside.y);
+    await animate(Animated.timing(doorGlass, { toValue: 0, duration: 400, useNativeDriver: true }));
+    await animate(Animated.timing(doorSwing, { toValue: 1, duration: 320, easing: Easing.out(Easing.quad), useNativeDriver: true }));
+    await walkTo(SPOT.housefront, Y20, false);
+    // It swings shut behind him, once he is clear of it.
+    Animated.timing(doorSwing, { toValue: 0, duration: 300, delay: 800, useNativeDriver: true }).start();
+    await walkTo(SPOT.seat, Y90, false);
+    await sitDown();
+    await face(Y180);
+    where.current = 'seat';
+    moving.current -= 1;
+  }, [animate, doorGlass, doorSwing, face, place, posX, posY, rig, sitDown, walkTo]);
+
+  const goHome = useCallback(async () => {
+    moving.current += 1;
+    setScreen('off');
+    await standUp();
+    // It is open by the time he gets there, so it never swings through him.
+    Animated.timing(doorSwing, { toValue: 1, duration: 300, delay: 800, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
+    await walkTo(SPOT.housefront, Y90, true);
+    await walkTo(SPOT.bedside, Y180, false);
+    await animate(Animated.timing(doorSwing, { toValue: 0, duration: 280, useNativeDriver: true }));
+    // Behind the shut door he lies down, then the door turns to glass.
+    setLying(true);
+    rig.view.setValue(Y90);
+    facing.current = Y90;
+    await PAUSE(200);
+    await animate(Animated.timing(doorGlass, { toValue: 1, duration: 800, useNativeDriver: true }));
+    where.current = 'bed';
+    moving.current -= 1;
+  }, [animate, doorGlass, doorSwing, rig, standUp, walkTo]);
+
+  const greet = useCallback(async () => {
+    if (where.current === 'bed') {
+      say(sleepLine(gpuNow.current, sleepLinesNow.current), 'house');
+      await hold(SLEEP_LINE_MS, () => wanted.current.check || !wanted.current.sleep);
+      say('');
+      return;
+    }
+    setTyping(false);
+    await face(Y20);
+    say(GREETING);
+    await hold(GREET_HOLD_MS, () => wanted.current.check);
+    say('');
+    if (!wanted.current.check) {
+      await face(Y180);
+      setTyping(true);
+    }
+  }, [face, hold, say]);
+
+  /** Checks everything, for real, in the order the boss asked for. */
+  const check = useCallback(async () => {
+    const seenBefore = api.events(connection).catch(() => []);
+    await settle();
+    if (where.current === 'bed' || where.current === 'house') await leaveHouse();
+
+    // The boss called: he turns to him and answers before going back to work
+    await settle();
+    say('');
+    setTyping(false);
+    await face(Y20);
+    say(TAP_LINE);
+    await hold(TAP_LINE_MS);
+    await settle();
+    const before = await seenBefore;
+    const newest = before.reduce((most, event) => Math.max(most, event.id), 0);
+
+    // Then a look at the computer
+    say('');
+    await face(Y180);
+    setTyping(true);
+    setScreen('check');
+    say('Bilgisayara bakıyorum.');
+    const [checked] = await Promise.all([
+      api.refreshEvents(connection).catch(() => ({ refreshed: false })),
+      PAUSE(LOOK_MS),
+    ]);
+
+    // Then over to the board, while this page and the others catch up
+    await settle();
+    say('');
+    await standUp();
+    setScreen('mail');
+    where.current = 'board';
+    await walkTo(SPOT.board, Y90, false);
+    await face(Y135);
+    await whileMoving(() => animate(Animated.timing(rig.armUp, { toValue: 1, duration: 300, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true })));
+    armIsUp.current = true;
+    say('Planlarınızı yazıyorum.', 'board');
+    setScribbling(true);
+    const [after] = await Promise.all([
+      api.events(connection).catch(() => before),
+      onUpdated().catch(() => undefined),
+      api.drafts(connection).catch(() => undefined),
+      chat.refresh(connection),
+    ]);
+    const lines = boardLines(upcomingNow.current, Date.now());
+    setBoard([]);
+    for (let line = 1; line <= lines.length && alive.current; line++) {
+      await settle();
+      setBoard(lines.slice(0, line));
+      await PAUSE(620);
+    }
+    lastBoard = lines;
+    await settle();
+    setScribbling(false);
+    armIsUp.current = false;
+    await whileMoving(() => animate(Animated.timing(rig.armUp, { toValue: 0, duration: 240, useNativeDriver: true })));
+
+    // Back to the computer to enter it all
+    await settle();
+    say('');
+    await walkTo(SPOT.seat, Y90, true);
+    await sitDown();
+    await face(Y180);
+    where.current = 'seat';
+    await settle();
+    setScreen('save');
+    say('Sisteme geçiriyorum.');
+    await hold(SAVE_MS);
+    await settle();
+    setScreen('mail');
+
+    // And the result, to the boss's face
+    setTyping(false);
+    await face(Y20);
+    const fresh = after.filter((event) => event.id > newest).length;
+    say(!checked.refreshed
+      ? 'Üzgünüm patron, kontrolü bitiremedim. Son bildiklerim duruyor.'
+      : fresh
+        ? `Bitti patron, ${fresh} yeni şey var. Bildirimler'e koydum.`
+        : 'Bitti patron, yeni bir şey yok. Her şey güncel.');
+    await hold(RESULT_MS, () => wanted.current.check);
+    await settle();
+    say('');
+    await face(Y180);
+    setTyping(true);
+    await settle();
+  }, [animate, connection, face, hold, leaveHouse, onUpdated, rig, say, settle, sitDown, standUp, walkTo, whileMoving]);
+
+  /** One thing at a time: whatever is wanted next runs when the last one is done. */
+  const drive = useCallback(async () => {
+    if (running.current) return;
+    running.current = true;
+    try {
+      while (alive.current) {
+        const want = wanted.current;
+        if (want.check) {
+          want.check = false;
+          checking.current = true;
+          await check();
+          checking.current = false;
+          want.check = false;
+        } else if (want.sleep && where.current !== 'bed') {
+          if (where.current === 'house') {
+            // He has not come out yet today: he is simply still in bed.
+            setLying(true);
+            rig.view.setValue(Y90);
+            facing.current = Y90;
+            setScreen('off');
+            await animate(Animated.timing(doorGlass, { toValue: 1, duration: 700, useNativeDriver: true }));
+            where.current = 'bed';
+            want.greet = true;
+          } else {
+            await goHome();
+            want.greet = true;
+          }
+        } else if (!want.sleep && (where.current === 'bed' || where.current === 'house')) {
+          await leaveHouse();
+          want.greet = true;
+        } else if (want.greet) {
+          want.greet = false;
+          await greet();
+        } else {
+          break;
+        }
+      }
+    } finally {
+      running.current = false;
+    }
+  }, [animate, check, doorGlass, goHome, greet, leaveHouse, rig]);
+  driveRef.current = () => void drive();
+
+  // Opening the app: the first time he comes out of his house; after that he is already at his desk.
+  useEffect(() => {
+    alive.current = true;
+    if (!introDone) {
+      introDone = true;
+      where.current = 'house';
+      rig.sit.setValue(0);
+      rig.view.setValue(Y20);
+      facing.current = Y20;
+      const inside = place(SPOT.bedside);
+      spotNow.current = inside;
+      posX.setValue(inside.x);
+      posY.setValue(inside.y);
+      setTyping(false);
+      setScreen('off');
+    } else {
+      rig.sit.setValue(1);
+    }
+    const started = setTimeout(() => driveRef.current(), wanted.current.known ? 300 : 1800);
+    const appState = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        wanted.current.greet = true;
+        driveRef.current();
+      }
+    });
+    return () => {
+      alive.current = false;
+      clearTimeout(started);
+      appState.remove();
+    };
+  }, [place, posX, posY, rig]);
+
+  // The model going off the GPU or coming back moves him
+  useEffect(() => {
+    wanted.current.sleep = isAsleep(gpu);
+    wanted.current.known = gpu !== undefined;
+    if (gpu !== undefined) driveRef.current();
+  }, [gpu]);
+
+  const onTap = useCallback(() => {
+    const now = Date.now();
+    tapTimes.current = [...tapTimes.current.filter((at) => now - at < FED_UP_WINDOW_MS), now];
+    if (tapTimes.current.length >= FED_UP_TAPS && !fedUpRunning.current && !fedUpWanted.current) {
+      tapTimes.current = [];
+      fedUpWanted.current = true;
+      // Right away if he is standing still; otherwise as soon as he finishes this move.
+      if (moving.current === 0 && checking.current) void fedUp();
+    }
+    if (checking.current) return;
+    wanted.current.check = true;
+    driveRef.current();
+  }, [fedUp]);
+
+  const worldX = (x: number) => (x + STAGE.ox / STAGE.unit) * scale;
+  const worldY = (y: number, z: number) => (STAGE.oy / STAGE.unit - (y * Math.cos(STAGE.elev) - z * Math.sin(STAGE.elev))) * scale;
+  const px = width / STAGE.w;
+  const door = STAGE.door;
+  const bedAt = { x: worldX(-1.88), y: worldY(1.0, -1.7) };
+  const spotFor = { seat: place(SPOT.seat).x, board: place(SPOT.board).x, house: worldX(SPOT.housefront.x) };
+  const bubbleWidth = Math.min(width * 0.64, 250);
+  const bubbleLeft = Math.max(10, Math.min(width - bubbleWidth - 10, spotFor[bubbleAt] - bubbleWidth / 2 + (bubbleAt === 'house' ? width * 0.2 : 0)));
+  const tail = Math.max(14, Math.min(bubbleWidth - 26, spotFor[bubbleAt] - bubbleLeft - 6));
+  const screenRect = {
+    left: worldX(SCREEN_RECT.x0), width: (SCREEN_RECT.x1 - SCREEN_RECT.x0) * scale,
+    top: worldY(SCREEN_RECT.y1, SCREEN_RECT.z), height: (SCREEN_RECT.y1 - SCREEN_RECT.y0) * Math.cos(STAGE.elev) * scale,
+  };
+  const boardRect = {
+    left: worldX(BOARD_RECT.x0), width: (BOARD_RECT.x1 - BOARD_RECT.x0) * scale,
+    top: worldY(BOARD_RECT.y1, BOARD_RECT.z), height: (BOARD_RECT.y1 - BOARD_RECT.y0) * Math.cos(STAGE.elev) * scale,
+  };
+
+  return (
+    <RNHostView modifiers={[size(width, height)]}>
+      <Pressable style={styles.host} onPress={onTap} accessibilityRole="button" accessibilityLabel="Kamil: her şeyi kontrol et">
+        <View style={{ width, height, borderRadius: 24, overflow: 'hidden', backgroundColor: '#17120e' }}>
+          <Image source={STAGE.src} fadeDuration={0} style={{ position: 'absolute', left: 0, top: 0, width, height }} />
+          <ComputerScreen rect={screenRect} mode={screen} scroll={screenScroll} />
+          <PlanBoard rect={boardRect} lines={board} />
+
+          {/* The robot and his shadow */}
+          <Animated.View pointerEvents="none" style={{ position: 'absolute', left: 0, top: 0, width, height, transform: [{ translateX: posX }, { translateY: posY }], opacity: lying ? 0 : 1 }}>
+            <Image source={STAGE.shadow} fadeDuration={0} style={{ position: 'absolute', left: -0.66 * scale, top: -0.17 * scale, width: 1.32 * scale, height: 0.42 * scale, opacity: 0.85 }} />
+            <RobotBody views={KAMIL} rig={rig} k={k} mood={lying ? 'asleep' : 'happy'} />
+          </Animated.View>
+          {lying ? (
+            // Asleep on the bed, seen through the glass door. He is a little smaller to fit the little house.
+            <View pointerEvents="none" style={{ position: 'absolute', left: bedAt.x, top: bedAt.y, width, height, transformOrigin: [0, 0, 0], transform: [{ rotate: '-90deg' }, { scale: 0.72 }] }}>
+              <RobotBody views={KAMIL} rig={rig} k={k} mood="asleep" lying />
+            </View>
+          ) : null}
+
+          {/* The door is in front of him while he is inside */}
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              position: 'absolute', left: door.x * px, top: door.y * px, width: door.w * px, height: door.h * px,
+              opacity: doorGlass.interpolate({ inputRange: [0, 1], outputRange: [1, 0.16] }),
+              transformOrigin: [0, door.h * px / 2, 0],
+              transform: [{ scaleX: doorSwing.interpolate({ inputRange: [0, 1], outputRange: [1, 0.12] }) }],
+            } as unknown as AnimatedStyle}>
+            <Image source={door.src} fadeDuration={0} style={{ width: door.w * px, height: door.h * px }} />
+          </Animated.View>
+
+          {lying ? <Sleeping left={worldX(-3.1)} top={worldY(1.6, -1.7)} cycle={dream} /> : null}
+
+          {shown ? (
+            <View pointerEvents="none" style={{ position: 'absolute', left: bubbleLeft, top: 10, width: bubbleWidth }}>
+              <View style={styles.speech}>
+                <RNText style={styles.speechText}>{shown}</RNText>
+              </View>
+              <View style={[styles.speechTail, { left: tail }]} />
+            </View>
+          ) : null}
+        </View>
+      </Pressable>
+    </RNHostView>
+  );
+}
+
+/** What is on his screen: mail going by, a fast run while checking, a bar while entering it into the system. */
+function ComputerScreen({ rect, mode, scroll }: {
+  rect: { left: number; top: number; width: number; height: number };
+  mode: 'off' | 'mail' | 'check' | 'save';
+  scroll: Animated.Value;
+}) {
+  if (mode === 'off') return null;
+  const row = rect.height / 5;
+  const rows = [0.82, 0.55, 0.7, 0.42, 0.9, 0.82, 0.55, 0.7, 0.42, 0.9];
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', ...rect, overflow: 'hidden', backgroundColor: '#13324d', opacity: 0.94 }}>
+      {mode === 'save' ? (
+        <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: rect.width * 0.14 }}>
+          <RNText numberOfLines={1} style={{ color: '#d8ecff', fontSize: row * 0.72, fontWeight: '700', marginBottom: row * 0.3 }}>Sisteme geçiriliyor</RNText>
+          <SaveBar height={row * 0.42} />
+        </View>
+      ) : (
+        <Animated.View style={{ transform: [{ translateY: scroll.interpolate({ inputRange: [0, 1], outputRange: [0, -row * 5] }) }] }}>
+          {rows.map((amount, index) => (
+            <View key={index} style={{ height: row, flexDirection: 'row', alignItems: 'center', paddingHorizontal: rect.width * 0.05, gap: rect.width * 0.03, backgroundColor: index % 5 === 0 ? 'rgba(143,211,255,0.13)' : undefined }}>
+              <View style={{ width: row * 0.45, height: row * 0.32, borderRadius: 1, backgroundColor: index % 5 === 0 ? '#ffd27a' : '#8fd3ff' }} />
+              <View style={{ width: `${amount * 78}%`, height: row * 0.18, borderRadius: 1, backgroundColor: '#b9dcf7', opacity: 0.85 }} />
+            </View>
+          ))}
+        </Animated.View>
+      )}
+    </View>
+  );
+}
+
+function SaveBar({ height }: { height: number }) {
+  const fill = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(fill, { toValue: 1, duration: SAVE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: true }).start();
+  }, [fill]);
+  return (
+    <View style={{ height, borderRadius: height / 2, backgroundColor: '#0a1c2c', overflow: 'hidden' }}>
+      <Animated.View style={{ flex: 1, backgroundColor: '#8fd3ff', transformOrigin: 'left', transform: [{ scaleX: fill }] }} />
+    </View>
+  );
+}
+
+function PlanBoard({ rect, lines }: { rect: { left: number; top: number; width: number; height: number }; lines: string[] }) {
+  const size_ = rect.width / 8.4;
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', ...rect, gap: size_ * 0.28 }}>
+      {lines.map((line, index) => (
+        <RNText key={`${index}-${line}`} numberOfLines={1} style={{ fontFamily: 'casual', color: index === 0 ? '#8c1f15' : '#0d1830', fontSize: index === 0 ? size_ * 1.2 : size_, fontWeight: '700' }}>
+          {line}
+        </RNText>
+      ))}
+    </View>
+  );
+}
+
+function Sleeping({ left, top, cycle }: { left: number; top: number; cycle: Animated.Value }) {
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', left, top }}>
+      {[0, 0.33, 0.66].map((phase, index) => (
+        <Animated.Text
+          key={phase}
+          style={{
+            position: 'absolute', left: index * 11, fontSize: 11 + index * 3, fontWeight: '800', color: '#f0e3c8',
+            opacity: cycle.interpolate({ inputRange: [0, phase, Math.min(phase + 0.3, 0.99), 1], outputRange: [0, 0, 0.95, 0] }),
+            transform: [{ translateY: cycle.interpolate({ inputRange: [0, 1], outputRange: [8, -18 - index * 6] }) }],
+          }}>
+          z
+        </Animated.Text>
+      ))}
+    </View>
+  );
+}
+
+// Kamil in the chat
+
+const CHAT_LINE = 'Buyurun patron, sizi dinliyorum.';
+const ANSWER_LINE = 'Buyurun patron.';
+const PACE_UNITS_PER_SECOND = 1.3;
+const ANSWER_FRESH_MS = 2500;
+const ANSWER_LINE_MS = 4000;
+
+// The walk in plays once a session. The answer's "buyurun" is only for an answer that has just landed, not for an old
+// conversation being opened.
+let chatGreeted = false;
+let answerLandedAt = 0;
+
+/** A strip of the page with Kamil standing in it and his speech bubble beside him. */
+function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }: {
+  width: number;
+  height: number;
+  rig: Rig;
+  posX: Animated.Value | number;
+  line: string;
+  bubbleLeft: number;
+  opacity?: Animated.Value | number;
+}) {
+  const k = height / (2.95 * CANVAS.unit);
+  const unit = CANVAS.unit * k;
+  const { shown } = useSpoken(line);
+  useFlap(line, rig.jaw);
+  useLife(rig, true);
+  useLoop(rig.idle, 2600);
+  return (
+    <View pointerEvents="none" style={{ width, height }}>
+      <Animated.View
+        style={{ position: 'absolute', left: 0, top: height - 0.08 * unit, width, height, opacity, transform: [{ translateX: posX }] }}>
+        <Image source={STAGE.shadow} fadeDuration={0} style={{ position: 'absolute', left: -0.66 * unit, top: -0.17 * unit, width: 1.32 * unit, height: 0.42 * unit, opacity: 0.6 }} />
+        <RobotBody views={KAMIL} rig={rig} k={k} mood="happy" />
+      </Animated.View>
+      {shown ? (
+        <View style={{ position: 'absolute', left: bubbleLeft, right: 2, top: height * 0.1 }}>
+          <View style={styles.speech}>
+            <RNText style={styles.speechText}>{shown}</RNText>
+          </View>
+          <View style={[styles.speechTail, { bottom: undefined, top: 12, left: -6, transform: [{ rotate: '135deg' }] }]} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Kamil on the empty chat screen: he walks in, turns to you and asks what you need. */
+export function ChatGreeter() {
+  const window = useWindowDimensions();
+  const width = window.width - 48;
+  const height = 112;
+  const stand = height * 0.36;
+  const first = useRef(!chatGreeted).current;
+  const rig = useRig(first ? Y90 : Y20);
+  const posX = useRef(new Animated.Value(first ? 0 : stand)).current;
+  const fade = useRef(new Animated.Value(first ? 0 : 1)).current;
+  const [line, setLine] = useState(first ? '' : CHAT_LINE);
+  const facing = useRef(first ? Y90 : Y20);
+  const flipped = useRef(false);
+  useEffect(() => {
+    if (!first) return;
+    chatGreeted = true;
+    let live = true;
+    const steps = Animated.loop(Animated.timing(rig.walk, { toValue: 1, duration: WALK_MS, easing: Easing.linear, useNativeDriver: true }));
+    steps.start();
+    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    Animated.timing(posX, { toValue: stand, duration: 950, easing: Easing.linear, useNativeDriver: true }).start(() => {
+      steps.stop();
+      rig.walk.setValue(0);
+      void turnRobot(rig, facing, flipped, Y20, false, () => live).then(() => {
+        if (live) setLine(CHAT_LINE);
+      });
+    });
+    return () => {
+      live = false;
+      steps.stop();
+    };
+  }, [fade, first, posX, rig, stand]);
+  return (
+    <RNHostView modifiers={[size(width, height)]}>
+      <View style={styles.host}>
+        <KamilStrip width={width} height={height} rig={rig} posX={posX} line={line} bubbleLeft={stand * 2 + 8} opacity={fade} />
+      </View>
+    </RNHostView>
+  );
+}
+
+/**
+ * While an answer is on its way he paces up and down, thinking. Each time the model really starts something new, he
+ * stops, turns to you and says it, then goes back to pacing. The line is one of the fixed step labels.
+ */
+export function WaitingFigure({ label }: { label: string }) {
+  const window = useWindowDimensions();
+  const width = window.width - 32; // the screen's own padding around this row
+  const height = 96;
+  const k = height / 2.95;
+  const left = k * 0.8;
+  const bubbleLeft = Math.round(width * 0.54);
+  const right = bubbleLeft - k * 0.8;
+  const rig = useRig(Y20);
+  const posX = useRef(new Animated.Value(left)).current;
+  const x = useRef(left);
+  const facing = useRef(Y20);
+  const flipped = useRef(false);
+
+  useEffect(() => () => { answerLandedAt = Date.now(); }, []);
+  useEffect(() => {
+    let live = true;
+    let move: Animated.CompositeAnimation | null = null;
+    const isLive = () => live;
+    const turn = (target: number, flip: boolean) => turnRobot(rig, facing, flipped, target, flip, isLive);
+    const walkTo = (to: number) => new Promise<void>((resolve) => {
+      const steps = Animated.loop(Animated.timing(rig.walk, { toValue: 1, duration: WALK_MS, easing: Easing.linear, useNativeDriver: true }));
+      steps.start();
+      move = Animated.timing(posX, {
+        toValue: to,
+        duration: Math.abs(to - x.current) / (PACE_UNITS_PER_SECOND * k) * 1000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      });
+      move.start(({ finished }) => {
+        steps.stop();
+        rig.walk.setValue(0);
+        if (finished) x.current = to;
+        resolve();
+      });
+    });
+    void (async () => {
+      await turn(Y20, false);
+      await PAUSE(1100 + label.length * 40);
+      while (live) {
+        const goRight = x.current < (left + right) / 2;
+        await turn(Y90, !goRight);
+        if (!live) return;
+        await walkTo(goRight ? right : left);
+        if (!live) return;
+        await turn(Y55, !goRight);
+        await PAUSE(450);
+      }
+    })();
+    return () => {
+      live = false;
+      (move as Animated.CompositeAnimation | null)?.stop();
+      posX.stopAnimation((value) => { x.current = value; });
+    };
+  }, [k, label, left, posX, right, rig]);
+
+  return (
+    <RNHostView modifiers={[size(width, height)]}>
+      <View style={styles.host}>
+        <KamilStrip width={width} height={height} rig={rig} posX={posX} line={label} bubbleLeft={bubbleLeft} />
+      </View>
+    </RNHostView>
+  );
+}
+
+/** Under the newest answer: he hands it over with a word, then just stands by. */
+export function AnswerFigure() {
+  const window = useWindowDimensions();
+  const width = window.width - 40;
+  const height = 84;
+  const rig = useRig(Y20);
+  const [line, setLine] = useState('');
+  useEffect(() => {
+    // Here, not during the render: the waiting figure marks the landing as it unmounts, in this same commit.
+    if (Date.now() - answerLandedAt >= ANSWER_FRESH_MS) return;
+    setLine(ANSWER_LINE);
+    const quiet = setTimeout(() => setLine(''), ANSWER_LINE_MS);
+    return () => clearTimeout(quiet);
+  }, []);
+  return (
+    <View style={{ marginTop: 6, marginLeft: 4 }}>
+      <KamilStrip width={width} height={height} rig={rig} posX={height * 0.42} line={line} bubbleLeft={height * 0.84 + 6} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  host: { flex: 1 },
+  speech: { backgroundColor: '#f3ecdc', borderRadius: 14, borderWidth: 1.5, borderColor: '#2a221a', paddingHorizontal: 11, paddingVertical: 7 },
+  speechText: { color: '#1e1812', fontSize: 13, lineHeight: 17 },
+  speechTail: { position: 'absolute', bottom: -7, width: 13, height: 13, backgroundColor: '#f3ecdc', borderRightWidth: 1.5, borderBottomWidth: 1.5, borderColor: '#2a221a', transform: [{ rotate: '45deg' }] },
+});

@@ -29,7 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api, ChatMessage, ChatSetup, Connection, Conversation, ModelId } from '../api';
 import { chat, useChat } from '../chatSession';
-import { AnswerFigure, ChatGreeter, WaitingFigure } from '../personal';
+import { AnswerFigure, ChatGreeter, WaitingFigure } from '../kamil';
 import { dative, formatDate } from '../format';
 import { icons } from '../icons';
 import { Notice, rounded } from '../ui';
@@ -337,7 +337,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
               renderItem={({ item, index }) => (
                 <>
                   <Message message={item} />
-                  {AnswerFigure && index === 0 && !sending && item.role === 'assistant' ? <AnswerFigure /> : null}
+                  {index === 0 && !sending && item.role === 'assistant' ? <AnswerFigure /> : null}
                 </>
               )}
             />
@@ -356,16 +356,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
                 </Text>
               </Row>
             ))}
-            {WaitingFigure ? (
-              <WaitingFigure label={waitingLabel} />
-            ) : (
-              <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-                <LoadingIndicator />
-                <Text color={colors.onSurfaceVariant} modifiers={[weight(1)]} style={{ typography: 'bodyMedium' }}>
-                  {waitingLabel}
-                </Text>
-              </Row>
-            )}
+            <WaitingFigure label={waitingLabel} />
           </Column>
         ) : null}
         {error ? <Notice tone="error">{error}</Notice> : null}

@@ -27,7 +27,7 @@ import { ServerStatus } from '../ServerStatus';
 import { api, Connection, GeminiSettings, saveConnection, ServerConnection } from '../api';
 import { askForNotifications, notificationsAllowed, sendTestNotification } from '../background';
 import { icons } from '../icons';
-import { DEFAULT_GEMINI_MODEL, loadPhoneSettings } from '../phone/settings';
+import { DEFAULT_GEMINI_MODEL, loadPhoneSettings, modelChoices } from '../phone/settings';
 import { connectPhone, forgetPhone } from '../phone/setup';
 import { Header, Notice, Panel, ShapeIcon, shapes, SectionTitle } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
@@ -156,7 +156,7 @@ function PhonePanel({ connection, onSaved }: Props) {
       <Hint>Anahtarı aistudio.google.com'dan alırsın. Ücretsiz katmanda Google yazdıklarını eğitim için kullanabilir.</Hint>
       {models.length ? (
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {models.slice(0, 6).map((name) => (
+          {modelChoices(models).map((name) => (
             <SuggestionChip key={name} onClick={() => { modelState.set(name); setModel(name); }}>
               <SuggestionChip.Label>
                 <Text>{name}</Text>
@@ -290,7 +290,7 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
       <Field label="Model" state={modelState} onChange={setModel} />
       {models.length ? (
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {models.slice(0, 6).map((name) => (
+          {modelChoices(models).map((name) => (
             <SuggestionChip key={name} onClick={() => { modelState.set(name); setModel(name); }}>
               <SuggestionChip.Label>
                 <Text>{name}</Text>
@@ -379,7 +379,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
         )}
       </Panel>
 
-      {connection?.mode === 'server' ? <UpdatePanel connection={connection} /> : null}
+      <UpdatePanel connection={connection} />
     </Column>
   );
 }

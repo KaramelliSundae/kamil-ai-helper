@@ -19,7 +19,8 @@ import type { ImageSourcePropType } from 'react-native';
 import { api, Connection, GpuState, ItemDetail, Upcoming } from '../api';
 import { DetailSheet } from '../DetailSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { TodayKamil } from '../personal';
+import { TodayKamil } from '../kamil';
+import { sleepLines } from '../personal';
 import { ServerStatus } from '../ServerStatus';
 import { formatDate, isSoon, longDate, timeLeft } from '../format';
 import { icons } from '../icons';
@@ -188,7 +189,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         <Header title="Bugün" subtitle={longDate(now)} />
         {error ? <Notice tone="error">{error}</Notice> : null}
         {taskError ? <Notice tone="error">{taskError}</Notice> : null}
-        <TodayKamil connection={connection} gpu={data?.gpu} upcoming={data?.upcoming} onUpdated={refresh} />
+        <TodayKamil connection={connection} gpu={data?.gpu} upcoming={data?.upcoming} onUpdated={refresh} sleepLines={sleepLines} />
         {data ? <Summary upcoming={data.upcoming} gpu={data.gpu} now={now} /> : null}
         <UpdatePanel connection={connection} onlyWhenAvailable />
         {connection.mode === 'server' && data && sharesGpu(data.gpu) ? <ServerStatus connection={connection} /> : null}

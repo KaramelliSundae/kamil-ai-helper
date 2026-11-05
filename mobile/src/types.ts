@@ -82,7 +82,7 @@ export type EventItem = {
   silent?: boolean;
 };
 export type ChatMessage = { id: number; role: 'user' | 'assistant'; content: string };
-export type Release = { versionCode: number; versionName: string; sha256: string; size: number };
+export type Release = { versionCode: number; versionName: string; sha256: string; size: number; source?: 'server' | 'github' };
 export type Draft = {
   id: string;
   to: string;
