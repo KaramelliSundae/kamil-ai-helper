@@ -4,8 +4,8 @@ export type Eye = { x: number; y: number; r: number; sx: number };
 type Point = number[];
 export type RobotView = {
   yaw: number; body: Sprite; armA: Sprite; armB: Sprite; legs: Sprite; sitLegs?: Sprite; legA?: Sprite; legB?: Sprite;
-  armAForward?: Sprite; armBForward?: Sprite; head: Sprite[]; eyes: Eye[][]; shut?: Sprite; worried?: Sprite; worriedEyes?: Eye[];
-  pivots: { armA: Point; armB: Point; legA: Point; legB: Point; neck: Point; hinge: Point };
+  armAForward?: Sprite; armBForward?: Sprite; figArm?: Sprite; head: Sprite[]; eyes: Eye[][]; shut?: Sprite; worried?: Sprite; worriedEyes?: Eye[];
+  pivots: { armA: Point; armB: Point; legA: Point; legB: Point; neck: Point; hinge: Point; fig: Point };
 };
 export const CANVAS = {"w": 406, "h": 490, "ox": 203.0, "oy": 459.2, "unit": 140};
 export const KAMIL: RobotView[] = [
@@ -40,8 +40,13 @@ export const KAMIL: RobotView[] = [
         182.89,
         225.86,
       ],
+      fig: [
+        103.76,
+        222.11,
+      ],
     },
     sitLegs: { src: require('./k_y20_sitlegs.webp'), x: 148, y: 340, w: 132, h: 103 },
+    figArm: { src: require('./k_y20_figarm.webp'), x: 70, y: 191, w: 84, h: 88 },
     head: [
       { src: require('./k_y20_head0.webp'), x: 136, y: 118, w: 157, h: 128 },
       { src: require('./k_y20_head1.webp'), x: 132, y: 106, w: 156, h: 137 },
@@ -109,6 +114,63 @@ export const KAMIL: RobotView[] = [
     shut: { src: require('./k_y20_shut.webp'), x: 136, y: 118, w: 158, h: 128 },
   },
   {
+    yaw: 38,
+    body: { src: require('./k_y38_body.webp'), x: 127, y: 220, w: 145, h: 184 },
+    armA: { src: require('./k_y38_armA.webp'), x: 242, y: 241, w: 65, h: 119 },
+    armB: { src: require('./k_y38_armB.webp'), x: 117, y: 254, w: 47, h: 126 },
+    legs: { src: require('./k_y38_legs.webp'), x: 149, y: 326, w: 108, h: 139 },
+    pivots: {
+      armA: [
+        255.4,
+        255.06,
+      ],
+      armB: [
+        150.6,
+        267.87,
+      ],
+      legA: [
+        226.17,
+        331.92,
+      ],
+      legB: [
+        179.83,
+        337.58,
+      ],
+      neck: [
+        203.0,
+        235.19,
+      ],
+      hinge: [
+        166.8,
+        227.25,
+      ],
+      fig: [
+        148.32,
+        225.92,
+      ],
+    },
+    sitLegs: { src: require('./k_y38_sitlegs.webp'), x: 154, y: 338, w: 152, h: 104 },
+    head: [
+      { src: require('./k_y38_head0.webp'), x: 136, y: 118, w: 165, h: 128 },
+    ],
+    eyes: [
+      [
+        {
+          x: 225.03,
+          y: 195.57,
+          r: 36.68,
+          sx: 0.823,
+        },
+        {
+          x: 279.28,
+          y: 188.92,
+          r: 36.68,
+          sx: 0.819,
+        },
+      ],
+    ],
+  },
+  {
     yaw: 55,
     body: { src: require('./k_y55_body.webp'), x: 122, y: 221, w: 152, h: 186 },
     armA: { src: require('./k_y55_armA.webp'), x: 227, y: 239, w: 64, h: 117 },
@@ -139,6 +201,10 @@ export const KAMIL: RobotView[] = [
         154.83,
         229.22,
       ],
+      fig: [
+        195.41,
+        227.38,
+      ],
     },
     sitLegs: { src: require('./k_y55_sitlegs.webp'), x: 165, y: 337, w: 156, h: 102 },
     head: [
@@ -161,6 +227,63 @@ export const KAMIL: RobotView[] = [
       ],
     ],
     shut: { src: require('./k_y55_shut.webp'), x: 136, y: 118, w: 168, h: 129 },
+  },
+  {
+    yaw: 72,
+    body: { src: require('./k_y72_body.webp'), x: 123, y: 222, w: 155, h: 187 },
+    armA: { src: require('./k_y72_armA.webp'), x: 210, y: 238, w: 57, h: 115 },
+    armB: { src: require('./k_y72_armB.webp'), x: 166, y: 258, w: 36, h: 127 },
+    legs: { src: require('./k_y72_legs.webp'), x: 164, y: 324, w: 78, h: 142 },
+    pivots: {
+      armA: [
+        223.55,
+        251.57,
+      ],
+      armB: [
+        182.45,
+        271.36,
+      ],
+      legA: [
+        212.09,
+        330.38,
+      ],
+      legB: [
+        193.91,
+        339.13,
+      ],
+      neck: [
+        203.0,
+        235.19,
+      ],
+      hinge: [
+        147.08,
+        231.66,
+      ],
+      fig: [
+        243.15,
+        226.61,
+      ],
+    },
+    sitLegs: { src: require('./k_y72_sitlegs.webp'), x: 179, y: 336, w: 148, h: 99 },
+    head: [
+      { src: require('./k_y72_head0.webp'), x: 136, y: 118, w: 164, h: 131 },
+    ],
+    eyes: [
+      [
+        {
+          x: 265.93,
+          y: 191.18,
+          r: 36.68,
+          sx: 0.611,
+        },
+        {
+          x: 287.21,
+          y: 180.93,
+          r: 36.68,
+          sx: 0.608,
+        },
+      ],
+    ],
   },
   {
     yaw: 90,
@@ -193,6 +316,10 @@ export const KAMIL: RobotView[] = [
         144.2,
         234.5,
       ],
+      fig: [
+        289.8,
+        223.47,
+      ],
     },
     sitLegs: { src: require('./k_y90_sitlegs.webp'), x: 189, y: 335, w: 133, h: 95 },
     legA: { src: require('./k_y90_lega.webp'), x: 172, y: 325, w: 62, h: 131 },
@@ -211,6 +338,57 @@ export const KAMIL: RobotView[] = [
       ],
     ],
     shut: { src: require('./k_y90_shut.webp'), x: 136, y: 118, w: 156, h: 131 },
+  },
+  {
+    yaw: 112,
+    body: { src: require('./k_y112_body.webp'), x: 122, y: 228, w: 156, h: 185 },
+    armA: { src: require('./k_y112_armA.webp'), x: 157, y: 238, w: 39, h: 114 },
+    armB: { src: require('./k_y112_armB.webp'), x: 214, y: 257, w: 61, h: 126 },
+    legs: { src: require('./k_y112_legs.webp'), x: 163, y: 324, w: 80, h: 142 },
+    pivots: {
+      armA: [
+        178.09,
+        251.82,
+      ],
+      armB: [
+        227.91,
+        271.11,
+      ],
+      legA: [
+        191.99,
+        330.49,
+      ],
+      legB: [
+        214.01,
+        339.02,
+      ],
+      neck: [
+        203.0,
+        235.19,
+      ],
+      hinge: [
+        148.48,
+        237.95,
+      ],
+      fig: [
+        334.88,
+        216.82,
+      ],
+    },
+    sitLegs: { src: require('./k_y112_sitlegs.webp'), x: 175, y: 335, w: 151, h: 88 },
+    head: [
+      { src: require('./k_y112_head0.webp'), x: 136, y: 118, w: 165, h: 131 },
+    ],
+    eyes: [
+      [
+        {
+          x: 294.75,
+          y: 182.6,
+          r: 36.68,
+          sx: 0.38,
+        },
+      ],
+    ],
   },
   {
     yaw: 135,
@@ -243,10 +421,57 @@ export const KAMIL: RobotView[] = [
         161.42,
         241.01,
       ],
+      fig: [
+        361.39,
+        207.58,
+      ],
     },
     sitLegs: { src: require('./k_y135_sitlegs.webp'), x: 158, y: 335, w: 156, h: 81 },
     head: [
       { src: require('./k_y135_head0.webp'), x: 136, y: 118, w: 166, h: 131 },
+    ],
+    eyes: [
+      [],
+    ],
+  },
+  {
+    yaw: 158,
+    body: { src: require('./k_y158_body.webp'), x: 136, y: 228, w: 134, h: 187 },
+    armA: { src: require('./k_y158_armA.webp'), x: 99, y: 244, w: 56, h: 116 },
+    armB: { src: require('./k_y158_armB.webp'), x: 251, y: 252, w: 67, h: 120 },
+    legs: { src: require('./k_y158_legs.webp'), x: 145, y: 327, w: 116, h: 136 },
+    pivots: {
+      armA: [
+        141.34,
+        257.57,
+      ],
+      armB: [
+        264.66,
+        265.36,
+      ],
+      legA: [
+        175.74,
+        333.03,
+      ],
+      legB: [
+        230.26,
+        336.47,
+      ],
+      neck: [
+        203.0,
+        235.19,
+      ],
+      hinge: [
+        180.97,
+        243.03,
+      ],
+      fig: [
+        362.73,
+        197.46,
+      ],
+    },
+    head: [
+      { src: require('./k_y158_head0.webp'), x: 136, y: 118, w: 158, h: 131 },
     ],
     eyes: [
       [],
@@ -282,6 +507,10 @@ export const KAMIL: RobotView[] = [
       hinge: [
         203.0,
         243.7,
+      ],
+      fig: [
+        340.2,
+        188.43,
       ],
     },
     armAForward: { src: require('./k_y180_armaf.webp'), x: 123, y: 248, w: 54, h: 36 },

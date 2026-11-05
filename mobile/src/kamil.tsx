@@ -6,7 +6,7 @@
  */
 import { RNHostView, Surface, Text, useMaterialColors } from '@expo/ui/jetpack-compose';
 import { padding, size, weight } from '@expo/ui/jetpack-compose/modifiers';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, AppState, Easing, Image, Pressable, StyleSheet, Text as RNText, useWindowDimensions, View } from 'react-native';
 
 import { api, Connection } from './api';
@@ -25,14 +25,15 @@ export const KAMIL_FRONT = KAMIL.slice(0, 1);
 const PAUSE = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const WALK_MS = 620;
 const STEP_ANGLE = 27; // the legs are stiff cones that swivel from the hip, with no knees
-const TURN_STEP_MS = 75;
+const TURN_STEP_MS = 42;
 const LEG_LENGTH = 0.9;
 const SIT_DROP = 0.24;
+// The drawn sides he turns through; the ones between these are only passed on the way.
 const Y20 = 0;
-const Y55 = 1;
-const Y90 = 2;
-const Y135 = 3;
-const Y180 = 4;
+const Y55 = 2;
+const Y90 = 4;
+const Y135 = 6;
+const Y180 = 8;
 
 type AnimatedStyle = React.ComponentProps<typeof Animated.View>['style'];
 
@@ -49,13 +50,41 @@ type Rig = {
   typing: Animated.Value;
   armUp: Animated.Value;
   scribble: Animated.Value;
+  figOn: Animated.Value;
+  /** The side he has settled on. Only that one moves, so the hidden drawings cost nothing frame by frame. */
+  liveView: number;
+  liveListeners: Set<(view: number) => void>;
 };
+
+function settleOn(rig: Rig, view: number) {
+  rig.liveView = view;
+  rig.liveListeners.forEach((listener) => listener(view));
+}
+
+function showView(rig: Rig, view: number) {
+  rig.view.setValue(view);
+  settleOn(rig, view);
+}
+
+// Smooth swings. A straight back-and-forth has a kink at each end that the eye reads as stutter.
+const SINE_STEPS = 16;
+const SINE_INPUT = Array.from({ length: SINE_STEPS + 1 }, (_, step) => step / SINE_STEPS);
+const sine = (t: number) => Math.sin(2 * Math.PI * t);
+
+function waveDeg(value: Animated.Value, amount: number, shape: (t: number) => number = sine) {
+  return value.interpolate({ inputRange: SINE_INPUT, outputRange: SINE_INPUT.map((t) => `${(amount * shape(t)).toFixed(3)}deg`) });
+}
+
+function wave(value: Animated.Value, shape: (t: number) => number) {
+  return value.interpolate({ inputRange: SINE_INPUT, outputRange: SINE_INPUT.map(shape) });
+}
 
 function makeRig(view = 0): Rig {
   const value = (start = 0) => new Animated.Value(start);
   return {
     view: value(view), flip: value(1), walk: value(), sit: value(), jaw: value(), blink: value(), gazeX: value(), gazeY: value(),
-    idle: value(), typing: value(), armUp: value(), scribble: value(),
+    idle: value(), typing: value(), armUp: value(), scribble: value(), figOn: value(),
+    liveView: view, liveListeners: new Set(),
   };
 }
 
@@ -77,15 +106,20 @@ function useLoop(value: Animated.Value, duration: number, enabled = true) {
   }, [duration, enabled, value]);
 }
 
-/** Turns through the drawn sides, changing to the mirrored ones only at the front or back, where it does not show. */
+/**
+ * Turns through the drawn sides, changing to the mirrored ones only at the front or back, where it does not show. The
+ * native driver runs the turn, so a busy moment in JavaScript cannot make it jump.
+ */
 async function turnRobot(rig: Rig, facing: { current: number }, flipped: { current: boolean }, target: number, flip: boolean, live: () => boolean) {
-  const turnTo = async (view: number) => {
-    while (live() && facing.current !== view) {
-      facing.current += facing.current < view ? 1 : -1;
-      rig.view.setValue(facing.current);
-      await PAUSE(TURN_STEP_MS);
+  const turnTo = (view: number) => new Promise<void>((resolve) => {
+    const steps = Math.abs(view - facing.current);
+    if (!live() || !steps) {
+      resolve();
+      return;
     }
-  };
+    facing.current = view;
+    Animated.timing(rig.view, { toValue: view, duration: steps * TURN_STEP_MS, easing: Easing.linear, useNativeDriver: true }).start(() => resolve());
+  });
   if (flipped.current !== flip) {
     const viaFront = facing.current + target <= (Y180 - facing.current) + (Y180 - target);
     await turnTo(viaFront ? Y20 : Y180);
@@ -93,6 +127,7 @@ async function turnRobot(rig: Rig, facing: { current: number }, flipped: { curre
     rig.flip.setValue(flip ? -1 : 1);
   }
   await turnTo(target);
+  settleOn(rig, facing.current);
 }
 
 /** Blinks now and then, and the small quick glances that make them look alive. */
@@ -180,13 +215,13 @@ function Pupils({ eyes, rig, k }: { eyes: Eye[]; rig: Rig; k: number }) {
 }
 
 /** The upper head, one finished drawing for each mouth level. A level shows only while the jaw is near it. */
-function Head({ view, rig, k, mood }: { view: RobotView; rig: Rig; k: number; mood: Mood }) {
+function Head({ view, rig, k, mood, live }: { view: RobotView; rig: Rig; k: number; mood: Mood; live: boolean }) {
   const levels = view.head.length;
   const closedEyes = mood === 'asleep';
   const worried = mood === 'worried' && view.worried;
   // Talking is a whole-body affair: the head bounces up with each syllable, the way a puppet's does.
-  const bounce = rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.07 * CANVAS.unit * k] });
-  const tilt = rig.jaw.interpolate({ inputRange: [0, 1, 2, 3], outputRange: ['0deg', '-1.5deg', '1.5deg', '-2.5deg'] });
+  const bounce = live ? rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.07 * CANVAS.unit * k] }) : 0;
+  const tilt = live ? rig.jaw.interpolate({ inputRange: [0, 1, 2, 3], outputRange: ['0deg', '-1.5deg', '1.5deg', '-2.5deg'] }) : '0deg';
   return (
     <Pivot k={k} at={view.pivots.neck} transform={[{ translateY: bounce }, { rotate: tilt }]}>
       {view.head.map((sprite, level) => (
@@ -212,35 +247,40 @@ function Head({ view, rig, k, mood }: { view: RobotView; rig: Rig; k: number; mo
 }
 
 /** A robot seen from one side. Its parts are stacked so that the nearest is drawn last. */
-function OneView({ view, index, rig, k, mood, lying }: {
+const OneView = memo(function OneView({ view, index, rig, k, mood, lying, live }: {
   view: RobotView;
   index: number;
   rig: Rig;
   k: number;
   mood: Mood;
   lying?: boolean;
+  live: boolean;
 }) {
   const unit = CANVAS.unit * k;
-  const swing = (amount: number) => rig.walk.interpolate({
-    inputRange: [0, 0.25, 0.5, 0.75, 1],
-    outputRange: ['0deg', `${amount}deg`, '0deg', `${-amount}deg`, '0deg'],
-  });
+  const swing = (amount: number) => (live ? waveDeg(rig.walk, amount) : '0deg');
   const sitStep = rig.sit.interpolate({ inputRange: [0, 0.49, 0.5, 1], outputRange: [0, 0, 1, 1] });
   const standStep = rig.sit.interpolate({ inputRange: [0, 0.49, 0.5, 1], outputRange: [1, 1, 0, 0] });
   const drop = rig.sit.interpolate({ inputRange: [0, 1], outputRange: [0, SIT_DROP * unit] });
   // Arms work against the legs. While typing they peck in turn; the near one can lift to write on the board.
-  const tap = (phase: number) => rig.typing.interpolate({
-    inputRange: [0, 0.25, 0.5, 0.75, 1],
-    outputRange: ['0deg', `${5 * phase}deg`, '0deg', `${-5 * phase}deg`, '0deg'],
-  });
-  const lift = rig.armUp.interpolate({ inputRange: [0, 1], outputRange: ['0deg', index === Y20 ? '112deg' : '-122deg'] });
-  const scribble = rig.scribble.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '9deg', '-5deg', '11deg', '0deg'] });
+  const tap = (side: number) => (live ? waveDeg(rig.typing, 4 * side) : '0deg');
+  const lift = rig.armUp.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '-122deg'] });
+  const scribble = live ? waveDeg(rig.scribble, 1, (t) => 6 * sine(t) + 3 * sine(2 * t)) : '0deg';
   const armA = <Pivot k={k} at={view.pivots.armA} transform={[{ rotate: swing(-20) }]} opacity={view.armAForward ? standStep : 1}><Piece sprite={view.armA} k={k} /></Pivot>;
   const armB = (
-    <Pivot k={k} at={view.pivots.armB} transform={[{ rotate: swing(20) }, { rotate: lift }, { rotate: scribble }]} opacity={view.armBForward ? standStep : 1}>
+    <Pivot
+      k={k}
+      at={view.pivots.armB}
+      transform={[{ rotate: swing(20) }, { rotate: lift }, { rotate: scribble }]}
+      opacity={view.figArm ? rig.figOn.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0, 0] }) : view.armBForward ? standStep : 1}>
       <Piece sprite={view.armB} k={k} />
     </Pivot>
   );
+  // The fig sign, thrust at you again and again.
+  const figArm = view.figArm ? (
+    <Pivot k={k} at={view.pivots.fig} opacity={rig.figOn} transform={[{ scale: live ? wave(rig.scribble, (t) => 1 + 0.16 * sine(t) ** 2) : 1 }]}>
+      <Piece sprite={view.figArm} k={k} />
+    </Pivot>
+  ) : null;
   const typingArms = view.armAForward && view.armBForward ? (
     <>
       <Pivot k={k} at={view.pivots.armA} transform={[{ rotate: tap(1) }]} opacity={sitStep}><Piece sprite={view.armAForward} k={k} /></Pivot>
@@ -254,17 +294,12 @@ function OneView({ view, index, rig, k, mood, lying }: {
     </>
   ) : <Pivot k={k} opacity={standStep}><Piece sprite={view.legs} k={k} /></Pivot>;
   const sitLegs = view.sitLegs ? <Pivot k={k} opacity={sitStep}><Piece sprite={view.sitLegs} k={k} /></Pivot> : null;
-  const nearArmOverHead = index >= Y55 && index <= Y135;
+  const nearArmOverHead = index >= Y55 && index < Y180;
+  const nearArmBeforeHead = !nearArmOverHead && index !== Y180;
   // The head lags behind the body at each step, which makes the stiff walk funny.
-  const headLag = rig.walk.interpolate({
-    inputRange: [0, 0.25, 0.5, 0.75, 1],
-    outputRange: ['0deg', '-4deg', '0deg', '3deg', '0deg'],
-  });
-  const breath = rig.idle.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: ['-1.1deg', '1.1deg', '-1.1deg'],
-  });
-  const typeNod = rig.typing.interpolate({ inputRange: [0, 0.5, 1], outputRange: ['0deg', '1deg', '0deg'] });
+  const headLag = live ? waveDeg(rig.walk, -3.5) : '0deg';
+  const breath = live ? waveDeg(rig.idle, 1.1) : '0deg';
+  const typeNod = live ? waveDeg(rig.typing, 0.5) : '0deg';
   return (
     <Animated.View
       pointerEvents="none"
@@ -283,24 +318,33 @@ function OneView({ view, index, rig, k, mood, lying }: {
         {index === Y180 ? armB : null}
         {typingArms}
         <Piece sprite={view.body} k={k} />
-        {index === Y20 ? armB : null}
+        {nearArmBeforeHead ? armB : null}
         <Pivot k={k} at={view.pivots.hinge} transform={[{ rotate: headLag }, { rotate: breath }, { rotate: typeNod }]}>
-          <Head view={view} rig={rig} k={k} mood={mood} />
+          <Head view={view} rig={rig} k={k} mood={mood} live={live} />
         </Pivot>
         {nearArmOverHead ? armB : null}
+        {figArm}
       </Pivot>
     </Animated.View>
   );
-}
+});
 
 /** The robot standing on one spot of the canvas; the canvas's ground point is at (0, 0) of its parent. */
-function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Rig; k: number; mood: Mood; lying?: boolean }) {
+const RobotBody = memo(function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Rig; k: number; mood: Mood; lying?: boolean }) {
+  const [liveView, setLiveView] = useState(rig.liveView);
+  useEffect(() => {
+    rig.liveListeners.add(setLiveView);
+    setLiveView(rig.liveView);
+    return () => {
+      rig.liveListeners.delete(setLiveView);
+    };
+  }, [rig]);
   // A stiff-legged walk drops the body when the legs are apart, and rocks it from side to side.
   const unit = CANVAS.unit * k;
   const low = LEG_LENGTH * (1 - Math.cos(STEP_ANGLE * Math.PI / 180)) * unit;
-  const bob = rig.walk.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: [0, low, 0, low, 0] });
-  const rock = rig.walk.interpolate({ inputRange: [0, 0.25, 0.5, 0.75, 1], outputRange: ['0deg', '5deg', '0deg', '-5deg', '0deg'] });
-  const hop = rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.03 * unit] });
+  const bob = useMemo(() => wave(rig.walk, (t) => low * sine(t) ** 2), [low, rig]);
+  const rock = useMemo(() => waveDeg(rig.walk, 5), [rig]);
+  const hop = useMemo(() => rig.jaw.interpolate({ inputRange: [0, 3], outputRange: [0, -0.03 * unit] }), [rig, unit]);
   return (
     <Animated.View
       pointerEvents="none"
@@ -309,10 +353,10 @@ function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Ri
         transformOrigin: [CANVAS.ox * k, CANVAS.oy * k, 0],
         transform: [{ scaleX: rig.flip }, { translateY: bob }, { translateY: hop }, { rotate: rock }],
       } as unknown as AnimatedStyle}>
-      {views.map((view, index) => <OneView key={view.yaw} view={view} index={index} rig={rig} k={k} mood={mood} lying={lying} />)}
+      {views.map((view, index) => <OneView key={view.yaw} view={view} index={index} rig={rig} k={k} mood={mood} lying={lying} live={index === liveView} />)}
     </Animated.View>
   );
-}
+});
 
 const WORRY_SHAKE: Record<Mood, number> = { happy: 2600, busy: 1100, worried: 420, asleep: 4800 };
 
@@ -401,6 +445,12 @@ export function Bubble({ text }: { text: string }) {
       </Text>
     </Surface>
   );
+}
+
+/** On its own so that each new letter redraws the words, not the whole room. */
+function SpokenText({ line }: { line: string }) {
+  const { shown } = useSpoken(line);
+  return <RNText style={styles.speechText}>{shown}</RNText>;
 }
 
 function isAsleep(gpu: GpuState | null | undefined): boolean {
@@ -518,14 +568,13 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   const [board, setBoard] = useState<string[]>(lastBoard);
   const [typing, setTyping] = useState(true);
   const [scribbling, setScribbling] = useState(false);
-  const { shown } = useSpoken(saying);
   useFlap(saying, rig.jaw);
   useLife(rig, !lying);
   useLoop(rig.idle, 2800);
-  useLoop(rig.typing, 420, typing);
+  useLoop(rig.typing, 560, typing);
   useLoop(rig.scribble, 520, scribbling);
   useLoop(dream, 2600, lying);
-  useLoop(screenScroll, screen === 'check' ? 1100 : 7000, screen !== 'off' && screen !== 'save');
+  useRowSteps(screenScroll, screen === 'check', screen !== 'off' && screen !== 'save');
 
   const alive = useRef(true);
   const where = useRef<'house' | 'bed' | 'seat' | 'board'>('seat');
@@ -591,7 +640,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     setSaying(line);
   }, []);
 
-  // Tapped too many times: he stops, turns to the boss and lets him know, then carries on where he was.
+  // Tapped too many times: he stops, turns to the boss, tells him and shows him the fig, then carries on where he was.
   const lineNow = useRef({ line: '', at: 'seat' as 'seat' | 'board' | 'house' });
   lineNow.current = { line: saying, at: bubbleAt };
   const typingNow = useRef(typing);
@@ -625,10 +674,10 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
       await turn(Y20, false);
       say(FED_UP_LINE, before.at);
       setScribbling(true);
-      await liftArm(0.8);
+      await animate(Animated.timing(rig.figOn, { toValue: 1, duration: 120, useNativeDriver: true }));
       await PAUSE(FED_UP_MS);
       setScribbling(false);
-      await liftArm(0);
+      await animate(Animated.timing(rig.figOn, { toValue: 0, duration: 160, useNativeDriver: true }));
       say(before.line, before.at);
       await turn(view, flip);
       if (before.arm) await liftArm(1);
@@ -637,7 +686,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     };
     fedUpRunning.current = run().finally(() => { fedUpRunning.current = null; });
     return fedUpRunning.current;
-  }, [liftArm, rig, say]);
+  }, [animate, liftArm, rig, say]);
   /** Waits out his complaint, or has it now if it is due. The routines call this before each thing they show. */
   const settle = useCallback(async () => {
     while (alive.current) {
@@ -652,7 +701,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     moving.current += 1;
     setLying(false);
     setScreen('mail');
-    rig.view.setValue(Y20);
+    showView(rig, Y20);
     facing.current = Y20;
     flipped.current = false;
     rig.flip.setValue(1);
@@ -683,7 +732,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     await animate(Animated.timing(doorSwing, { toValue: 0, duration: 280, useNativeDriver: true }));
     // Behind the shut door he lies down, then the door turns to glass.
     setLying(true);
-    rig.view.setValue(Y90);
+    showView(rig, Y90);
     facing.current = Y90;
     await PAUSE(200);
     await animate(Animated.timing(doorGlass, { toValue: 1, duration: 800, useNativeDriver: true }));
@@ -816,7 +865,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
           if (where.current === 'house') {
             // He has not come out yet today: he is simply still in bed.
             setLying(true);
-            rig.view.setValue(Y90);
+            showView(rig, Y90);
             facing.current = Y90;
             setScreen('off');
             await animate(Animated.timing(doorGlass, { toValue: 1, duration: 700, useNativeDriver: true }));
@@ -849,7 +898,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
       introDone = true;
       where.current = 'house';
       rig.sit.setValue(0);
-      rig.view.setValue(Y20);
+      showView(rig, Y20);
       facing.current = Y20;
       const inside = place(SPOT.bedside);
       spotNow.current = inside;
@@ -904,14 +953,16 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   const bubbleWidth = Math.min(width * 0.64, 250);
   const bubbleLeft = Math.max(10, Math.min(width - bubbleWidth - 10, spotFor[bubbleAt] - bubbleWidth / 2 + (bubbleAt === 'house' ? width * 0.2 : 0)));
   const tail = Math.max(14, Math.min(bubbleWidth - 26, spotFor[bubbleAt] - bubbleLeft - 6));
-  const screenRect = {
-    left: worldX(SCREEN_RECT.x0), width: (SCREEN_RECT.x1 - SCREEN_RECT.x0) * scale,
-    top: worldY(SCREEN_RECT.y1, SCREEN_RECT.z), height: (SCREEN_RECT.y1 - SCREEN_RECT.y0) * Math.cos(STAGE.elev) * scale,
-  };
-  const boardRect = {
-    left: worldX(BOARD_RECT.x0), width: (BOARD_RECT.x1 - BOARD_RECT.x0) * scale,
-    top: worldY(BOARD_RECT.y1, BOARD_RECT.z), height: (BOARD_RECT.y1 - BOARD_RECT.y0) * Math.cos(STAGE.elev) * scale,
-  };
+  const rectOf = (area: typeof SCREEN_RECT) => ({
+    left: (area.x0 + STAGE.ox / STAGE.unit) * scale,
+    width: (area.x1 - area.x0) * scale,
+    top: (STAGE.oy / STAGE.unit - (area.y1 * Math.cos(STAGE.elev) - area.z * Math.sin(STAGE.elev))) * scale,
+    height: (area.y1 - area.y0) * Math.cos(STAGE.elev) * scale,
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const screenRect = useMemo(() => rectOf(SCREEN_RECT), [scale]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const boardRect = useMemo(() => rectOf(BOARD_RECT), [scale]);
 
   return (
     <RNHostView modifiers={[size(width, height)]}>
@@ -947,10 +998,10 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
 
           {lying ? <Sleeping left={worldX(-3.1)} top={worldY(1.6, -1.7)} cycle={dream} /> : null}
 
-          {shown ? (
+          {saying ? (
             <View pointerEvents="none" style={{ position: 'absolute', left: bubbleLeft, top: 10, width: bubbleWidth }}>
               <View style={styles.speech}>
-                <RNText style={styles.speechText}>{shown}</RNText>
+                <SpokenText line={saying} />
               </View>
               <View style={[styles.speechTail, { left: tail }]} />
             </View>
@@ -961,14 +1012,31 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   );
 }
 
+const SCREEN_ROWS = 5;
+
+/** A list creeping along at a few pixels a second jitters on any screen, so the rows step along with a soft ease. */
+function useRowSteps(value: Animated.Value, fast: boolean, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const moves: Animated.CompositeAnimation[] = [];
+    for (let row = 1; row <= SCREEN_ROWS; row++) {
+      moves.push(Animated.timing(value, { toValue: row / SCREEN_ROWS, duration: fast ? 240 : 560, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }));
+      moves.push(Animated.delay(fast ? 110 : 1250));
+    }
+    const run = Animated.loop(Animated.sequence(moves));
+    run.start();
+    return () => run.stop();
+  }, [enabled, fast, value]);
+}
+
 /** What is on his screen: mail going by, a fast run while checking, a bar while entering it into the system. */
-function ComputerScreen({ rect, mode, scroll }: {
+const ComputerScreen = memo(function ComputerScreen({ rect, mode, scroll }: {
   rect: { left: number; top: number; width: number; height: number };
   mode: 'off' | 'mail' | 'check' | 'save';
   scroll: Animated.Value;
 }) {
   if (mode === 'off') return null;
-  const row = rect.height / 5;
+  const row = rect.height / SCREEN_ROWS;
   const rows = [0.82, 0.55, 0.7, 0.42, 0.9, 0.82, 0.55, 0.7, 0.42, 0.9];
   return (
     <View pointerEvents="none" style={{ position: 'absolute', ...rect, overflow: 'hidden', backgroundColor: '#13324d', opacity: 0.94 }}>
@@ -978,7 +1046,7 @@ function ComputerScreen({ rect, mode, scroll }: {
           <SaveBar height={row * 0.42} />
         </View>
       ) : (
-        <Animated.View style={{ transform: [{ translateY: scroll.interpolate({ inputRange: [0, 1], outputRange: [0, -row * 5] }) }] }}>
+        <Animated.View style={{ transform: [{ translateY: scroll.interpolate({ inputRange: [0, 1], outputRange: [0, -row * SCREEN_ROWS] }) }] }}>
           {rows.map((amount, index) => (
             <View key={index} style={{ height: row, flexDirection: 'row', alignItems: 'center', paddingHorizontal: rect.width * 0.05, gap: rect.width * 0.03, backgroundColor: index % 5 === 0 ? 'rgba(143,211,255,0.13)' : undefined }}>
               <View style={{ width: row * 0.45, height: row * 0.32, borderRadius: 1, backgroundColor: index % 5 === 0 ? '#ffd27a' : '#8fd3ff' }} />
@@ -989,7 +1057,7 @@ function ComputerScreen({ rect, mode, scroll }: {
       )}
     </View>
   );
-}
+});
 
 function SaveBar({ height }: { height: number }) {
   const fill = useRef(new Animated.Value(0)).current;
@@ -1003,7 +1071,7 @@ function SaveBar({ height }: { height: number }) {
   );
 }
 
-function PlanBoard({ rect, lines }: { rect: { left: number; top: number; width: number; height: number }; lines: string[] }) {
+const PlanBoard = memo(function PlanBoard({ rect, lines }: { rect: { left: number; top: number; width: number; height: number }; lines: string[] }) {
   const size_ = rect.width / 8.4;
   return (
     <View pointerEvents="none" style={{ position: 'absolute', ...rect, gap: size_ * 0.28 }}>
@@ -1014,7 +1082,7 @@ function PlanBoard({ rect, lines }: { rect: { left: number; top: number; width: 
       ))}
     </View>
   );
-}
+});
 
 function Sleeping({ left, top, cycle }: { left: number; top: number; cycle: Animated.Value }) {
   return (
@@ -1059,7 +1127,6 @@ function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }:
 }) {
   const k = height / (2.95 * CANVAS.unit);
   const unit = CANVAS.unit * k;
-  const { shown } = useSpoken(line);
   useFlap(line, rig.jaw);
   useLife(rig, true);
   useLoop(rig.idle, 2600);
@@ -1070,10 +1137,10 @@ function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }:
         <Image source={STAGE.shadow} fadeDuration={0} style={{ position: 'absolute', left: -0.66 * unit, top: -0.17 * unit, width: 1.32 * unit, height: 0.42 * unit, opacity: 0.6 }} />
         <RobotBody views={KAMIL} rig={rig} k={k} mood="happy" />
       </Animated.View>
-      {shown ? (
+      {line ? (
         <View style={{ position: 'absolute', left: bubbleLeft, right: 2, top: height * 0.1 }}>
           <View style={styles.speech}>
-            <RNText style={styles.speechText}>{shown}</RNText>
+            <SpokenText line={line} />
           </View>
           <View style={[styles.speechTail, { bottom: undefined, top: 12, left: -6, transform: [{ rotate: '135deg' }] }]} />
         </View>
