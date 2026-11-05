@@ -1,5 +1,5 @@
 import type { ServerConnection } from './api';
-import type { SleepLines } from './kamil';
+import type { Guest, SleepLines } from './kamil';
 
 /** Room for a build's own touches. This one has none. */
 export function ServerReport(_props: { connection: ServerConnection }) {
@@ -7,3 +7,5 @@ export function ServerReport(_props: { connection: ServerConnection }) {
 }
 
 export const sleepLines: SleepLines | null = null;
+
+export const guest: Guest | null = null;

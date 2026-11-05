@@ -22,22 +22,22 @@ export type Mood = 'happy' | 'busy' | 'worried' | 'asleep';
 /** Kamil seen from the front, for places where he only stands. */
 export const KAMIL_FRONT = KAMIL.slice(0, 1);
 
-const PAUSE = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const WALK_MS = 620;
+export const PAUSE = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const WALK_MS = 620;
 const STEP_ANGLE = 27; // the legs are stiff cones that swivel from the hip, with no knees
 const TURN_STEP_MS = 42;
 const LEG_LENGTH = 0.9;
 const SIT_DROP = 0.24;
 // The drawn sides he turns through; the ones between these are only passed on the way.
-const Y20 = 0;
-const Y55 = 2;
-const Y90 = 4;
-const Y135 = 6;
-const Y180 = 8;
+export const Y20 = 0;
+export const Y55 = 2;
+export const Y90 = 4;
+export const Y135 = 6;
+export const Y180 = 8;
 
 type AnimatedStyle = React.ComponentProps<typeof Animated.View>['style'];
 
-type Rig = {
+export type Rig = {
   view: Animated.Value;
   flip: Animated.Value;
   walk: Animated.Value;
@@ -61,7 +61,7 @@ function settleOn(rig: Rig, view: number) {
   rig.liveListeners.forEach((listener) => listener(view));
 }
 
-function showView(rig: Rig, view: number) {
+export function showView(rig: Rig, view: number) {
   rig.view.setValue(view);
   settleOn(rig, view);
 }
@@ -88,13 +88,13 @@ function makeRig(view = 0): Rig {
   };
 }
 
-function useRig(view = 0): Rig {
+export function useRig(view = 0): Rig {
   const holder = useRef<Rig | null>(null);
   if (!holder.current) holder.current = makeRig(view);
   return holder.current;
 }
 
-function useLoop(value: Animated.Value, duration: number, enabled = true) {
+export function useLoop(value: Animated.Value, duration: number, enabled = true) {
   useEffect(() => {
     if (!enabled) {
       value.setValue(0);
@@ -110,7 +110,7 @@ function useLoop(value: Animated.Value, duration: number, enabled = true) {
  * Turns through the drawn sides, changing to the mirrored ones only at the front or back, where it does not show. The
  * native driver runs the turn, so a busy moment in JavaScript cannot make it jump.
  */
-async function turnRobot(rig: Rig, facing: { current: number }, flipped: { current: boolean }, target: number, flip: boolean, live: () => boolean) {
+export async function turnRobot(rig: Rig, facing: { current: number }, flipped: { current: boolean }, target: number, flip: boolean, live: () => boolean) {
   const turnTo = (view: number) => new Promise<void>((resolve) => {
     const steps = Math.abs(view - facing.current);
     if (!live() || !steps) {
@@ -131,7 +131,7 @@ async function turnRobot(rig: Rig, facing: { current: number }, flipped: { curre
 }
 
 /** Blinks now and then, and the small quick glances that make them look alive. */
-function useLife(rig: Rig, awake: boolean) {
+export function useLife(rig: Rig, awake: boolean) {
   useEffect(() => {
     if (!awake) return;
     const blink = Animated.loop(Animated.sequence([
@@ -330,7 +330,7 @@ const OneView = memo(function OneView({ view, index, rig, k, mood, lying, live }
 });
 
 /** The robot standing on one spot of the canvas; the canvas's ground point is at (0, 0) of its parent. */
-const RobotBody = memo(function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Rig; k: number; mood: Mood; lying?: boolean }) {
+export const RobotBody = memo(function RobotBody({ views, rig, k, mood, lying }: { views: RobotView[]; rig: Rig; k: number; mood: Mood; lying?: boolean }) {
   const [liveView, setLiveView] = useState(rig.liveView);
   useEffect(() => {
     rig.liveListeners.add(setLiveView);
@@ -413,7 +413,7 @@ export function mouthFor(letter: string | undefined, dice: number): number {
 }
 
 /** Flaps the jaw along with the text. It goes by the letters, so it pauses between words like a real mouth. */
-function useFlap(text: string, jaw: Animated.Value) {
+export function useFlap(text: string, jaw: Animated.Value) {
   useEffect(() => {
     if (!text) {
       Animated.timing(jaw, { toValue: 0, duration: 60, useNativeDriver: true }).start();
@@ -451,6 +451,18 @@ export function Bubble({ text }: { text: string }) {
 function SpokenText({ line }: { line: string }) {
   const { shown } = useSpoken(line);
   return <RNText style={styles.speechText}>{shown}</RNText>;
+}
+
+/** A bubble over a scene, with its tail pointing at whoever is talking. */
+export function SpeechBubble({ line, left, top, width, tail }: { line: string; left: number; top: number; width: number; tail: number }) {
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', left, top, width }}>
+      <View style={styles.speech}>
+        <SpokenText line={line} />
+      </View>
+      <View style={[styles.speechTail, { left: tail }]} />
+    </View>
+  );
 }
 
 function isAsleep(gpu: GpuState | null | undefined): boolean {
@@ -512,18 +524,45 @@ const SPOT = {
 const SCREEN_RECT = { x0: -0.55, x1: 1.05, y0: 1.46, y1: 2.46, z: -1.38 };
 const BOARD_RECT = { x0: 2.3, x1: 3.84, y0: 1.2, y1: 3.0, z: -2.27 };
 
+/** What a guest can do in the room. */
+export type RoomControls = {
+  rig: Rig;
+  /** dp per unit of the room, and the size of the room in dp. */
+  scale: number;
+  width: number;
+  height: number;
+  k: number;
+  seat: { x: number; z: number };
+  place: (spot: { x: number; z: number }) => { x: number; y: number };
+  /** A line in the bubble over a spot of the room. Only his own lines move Kamil's mouth. */
+  say: (line: string, byGuest: boolean, overX: number) => void;
+  walkTo: (spot: { x: number; z: number }, view: number, flip: boolean, unitsPerSecond?: number) => Promise<void>;
+  face: (view: number, flip?: boolean) => Promise<void>;
+  standUp: () => Promise<void>;
+  sitDown: () => Promise<void>;
+  setTyping: (on: boolean) => void;
+};
+
+export type Guest = {
+  /** Drawn over everything else in the room. */
+  Layer: React.ComponentType<{ scale: number; k: number; width: number; height: number; onReady: (visit: (room: RoomControls) => Promise<void>) => void }>;
+};
+
+const GUEST_HOLD_MS = 10000;
+
 /**
  * Kamil's room on the main page, with his house on the left, his computer in the middle and his board on the right.
  * Tapping really checks: he looks at the computer while Canvas and mail are checked, writes the nearest deadlines
  * on the board while this page reloads, then goes back to enter it all. What he says at the end comes from the real
  * result. When the model is off the GPU he goes home to sleep; the door turns to glass only while he sleeps.
  */
-export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, sleepLines }: {
+export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, sleepLines, guest }: {
   connection: Connection;
   gpu?: GpuState | null;
   upcoming?: Upcoming[];
   onUpdated: () => Promise<unknown>;
   sleepLines?: SleepLines | null;
+  guest?: Guest | null;
 }) {
   const window = useWindowDimensions();
   const width = window.width - 32;
@@ -568,7 +607,9 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   const [board, setBoard] = useState<string[]>(lastBoard);
   const [typing, setTyping] = useState(true);
   const [scribbling, setScribbling] = useState(false);
-  useFlap(saying, rig.jaw);
+  const [guestTalking, setGuestTalking] = useState(false);
+  const [bubbleX, setBubbleX] = useState<number | null>(null);
+  useFlap(guestTalking ? '' : saying, rig.jaw);
   useLife(rig, !lying);
   useLoop(rig.idle, 2800);
   useLoop(rig.typing, 560, typing);
@@ -582,7 +623,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   const flipped = useRef(false);
   const running = useRef(false);
   const checking = useRef(false);
-  const wanted = useRef({ check: false, greet: false, sleep: isAsleep(gpu), known: gpu !== undefined });
+  const wanted = useRef({ check: false, greet: false, visit: false, sleep: isAsleep(gpu), known: gpu !== undefined });
   const upcomingNow = useRef(upcoming);
   upcomingNow.current = upcoming;
   const gpuNow = useRef(gpu);
@@ -848,6 +889,30 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     await settle();
   }, [animate, connection, face, hold, leaveHouse, onUpdated, rig, say, settle, sitDown, standUp, walkTo, whileMoving]);
 
+  // A guest turns up only when the boss has held his finger on the house for a long time.
+  const visit = useRef<((room: RoomControls) => Promise<void>) | null>(null);
+  const onGuestReady = useCallback((run: (room: RoomControls) => Promise<void>) => { visit.current = run; }, []);
+  const receiveGuest = useCallback(async () => {
+    const run = visit.current;
+    if (!run) return;
+    await run({
+      rig, scale, width, height, k, place, seat: SPOT.seat, walkTo, face, standUp, sitDown, setTyping,
+      say: (line, byGuest, overX) => {
+        setGuestTalking(byGuest && !!line);
+        setBubbleX(overX);
+        setSaying(line);
+      },
+    });
+    setGuestTalking(false);
+    setBubbleX(null);
+    setSaying('');
+  }, [face, height, k, place, rig, scale, sitDown, standUp, walkTo, width]);
+  const onHold = useCallback(() => {
+    if (!visit.current) return;
+    wanted.current.visit = true;
+    driveRef.current();
+  }, []);
+
   /** One thing at a time: whatever is wanted next runs when the last one is done. */
   const drive = useCallback(async () => {
     if (running.current) return;
@@ -855,7 +920,13 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     try {
       while (alive.current) {
         const want = wanted.current;
-        if (want.check) {
+        if (want.visit) {
+          want.visit = false;
+          if (where.current === 'bed' || where.current === 'house') await leaveHouse();
+          moving.current += 1;
+          await receiveGuest();
+          moving.current -= 1;
+        } else if (want.check) {
           want.check = false;
           checking.current = true;
           await check();
@@ -888,7 +959,7 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
     } finally {
       running.current = false;
     }
-  }, [animate, check, doorGlass, goHome, greet, leaveHouse, rig]);
+  }, [animate, check, doorGlass, goHome, greet, leaveHouse, receiveGuest, rig]);
   driveRef.current = () => void drive();
 
   // Opening the app: the first time he comes out of his house; after that he is already at his desk.
@@ -951,8 +1022,9 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
   const bedAt = { x: worldX(-1.88), y: worldY(1.0, -1.7) };
   const spotFor = { seat: place(SPOT.seat).x, board: place(SPOT.board).x, house: worldX(SPOT.housefront.x) };
   const bubbleWidth = Math.min(width * 0.64, 250);
-  const bubbleLeft = Math.max(10, Math.min(width - bubbleWidth - 10, spotFor[bubbleAt] - bubbleWidth / 2 + (bubbleAt === 'house' ? width * 0.2 : 0)));
-  const tail = Math.max(14, Math.min(bubbleWidth - 26, spotFor[bubbleAt] - bubbleLeft - 6));
+  const bubbleOver = bubbleX ?? spotFor[bubbleAt];
+  const bubbleLeft = Math.max(10, Math.min(width - bubbleWidth - 10, bubbleOver - bubbleWidth / 2 + (bubbleX === null && bubbleAt === 'house' ? width * 0.2 : 0)));
+  const tail = Math.max(14, Math.min(bubbleWidth - 26, bubbleOver - bubbleLeft - 6));
   const rectOf = (area: typeof SCREEN_RECT) => ({
     left: (area.x0 + STAGE.ox / STAGE.unit) * scale,
     width: (area.x1 - area.x0) * scale,
@@ -997,15 +1069,18 @@ export function TodayKamil({ connection, gpu: gpuProp, upcoming, onUpdated, slee
           </Animated.View>
 
           {lying ? <Sleeping left={worldX(-3.1)} top={worldY(1.6, -1.7)} cycle={dream} /> : null}
-
-          {saying ? (
-            <View pointerEvents="none" style={{ position: 'absolute', left: bubbleLeft, top: 10, width: bubbleWidth }}>
-              <View style={styles.speech}>
-                <SpokenText line={saying} />
-              </View>
-              <View style={[styles.speechTail, { left: tail }]} />
-            </View>
+          {guest ? <guest.Layer scale={scale} k={k} width={width} height={height} onReady={onGuestReady} /> : null}
+          {guest ? (
+            // The house takes a tap like the rest of the room; only a very long press there means anything else.
+            <Pressable
+              onPress={onTap}
+              onLongPress={onHold}
+              delayLongPress={GUEST_HOLD_MS}
+              style={{ position: 'absolute', left: 0, top: worldY(3.6, -0.6), width: worldX(-1.55), bottom: 0 }}
+            />
           ) : null}
+
+          {saying ? <SpeechBubble line={saying} left={bubbleLeft} top={10} width={bubbleWidth} tail={tail} /> : null}
         </View>
       </Pressable>
     </RNHostView>

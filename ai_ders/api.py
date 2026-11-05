@@ -463,7 +463,8 @@ def create_app(
     def gpu(store: Db) -> dict[str, Any]:
         if not gate:
             raise HTTPException(404, "bu sunucuda GPU kapısı yok")
-        return {**gpu_state(), "lastPollAt": store.get_meta("last_poll_at")}
+        midnight = datetime.now(settings.timezone).replace(hour=0, minute=0, second=0, microsecond=0)
+        return {**gpu_state(), "lastPollAt": store.get_meta("last_poll_at"), "today": store.work_since(midnight)}
 
     @app.post("/v1/gpu/priority", dependencies=guarded)
     def set_priority(request: PriorityRequest) -> dict[str, Any]:

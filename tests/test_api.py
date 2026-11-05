@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -240,6 +240,19 @@ def test_today_survives_a_stopped_gate(api_settings, sends):
     assert body["gpu"]["llmActive"] is False
 
 
+def test_gpu_counts_what_was_done_today(api_settings, sends, db):
+    now = datetime.now(UTC)
+    old = now - timedelta(days=2)
+    conversation = db.new_conversation("soru", now)
+    db.add_chat("user", "soru", now, conversation)
+    db.add_chat("assistant", "cevap", now, conversation)
+    db.add_chat("assistant", "eski cevap", old, conversation)
+    db.add_event("a:1", "new", "high", "t", "b", "", now)
+    db.add_event("a:2", "new", "high", "t", "b", "", old)
+    body = gated(api_settings, sends).get("/v1/gpu", headers=AUTH).json()
+    assert body["today"] == {"answers": 1, "notifications": 1}
+
+
 def test_without_a_gate_there_is_no_gpu_switch(client):
     assert client.get("/v1/gpu", headers=AUTH).status_code == 404
     assert client.post("/v1/gpu", json={"mode": "image"}, headers=AUTH).status_code == 404
@@ -388,7 +401,8 @@ def test_item_goes_to_google_tasks_once_with_its_local_due_date(api_settings, se
 
     tasks = FakeTasks()
     client = TestClient(create_app(api_settings, Llm(), sends, tasks))
-    due = NOW.replace(hour=20, minute=59) + td(days=2)  # 23:59 in Istanbul
+    # Counted from today, so that it stays in the coming days whenever this runs.
+    due = datetime.now(UTC).replace(hour=20, minute=59, second=0, microsecond=0) + td(days=2)  # 23:59 in Istanbul
     db.upsert(Item(key="assignment:1", kind="assignment", title="HW1", course="COMP303", url="https://c/a/1", due_at=due), NOW)
     assert client.post("/v1/tasks", json={"key": "assignment:1"}, headers=AUTH).json() == {"status": "added"}
     assert client.post("/v1/tasks", json={"key": "assignment:1"}, headers=AUTH).json() == {"status": "exists"}

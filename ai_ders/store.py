@@ -345,6 +345,13 @@ class Store:
         self.db.execute("DELETE FROM conversations")
         self.db.commit()
 
+    def work_since(self, since: datetime) -> dict[str, int]:
+        """How many answers and notifications Kamil has produced since a moment."""
+        text = to_text(since)
+        answers = self.db.execute("SELECT COUNT(*) FROM chat WHERE role = 'assistant' AND created_at >= ?", (text,)).fetchone()[0]
+        notifications = self.db.execute("SELECT COUNT(*) FROM events WHERE created_at >= ?", (text,)).fetchone()[0]
+        return {"answers": answers, "notifications": notifications}
+
     def add_chat(self, role: str, content: str, now: datetime, conversation_id: int) -> None:
         self.db.execute(
             "INSERT INTO chat (role, content, created_at, conversation_id) VALUES (?, ?, ?, ?)",

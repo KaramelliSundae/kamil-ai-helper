@@ -29,6 +29,8 @@ export type GpuState = {
     cores?: number;
   };
   lastPollAt?: string | null;
+  /** What Kamil has done since midnight. */
+  today?: { answers: number; notifications: number };
 };
 export type ServerJob = {
   id: string;
