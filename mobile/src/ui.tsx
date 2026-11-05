@@ -131,3 +131,15 @@ export function Refreshable({ refreshing, onRefresh, children }: {
     </PullToRefreshBox>
   );
 }
+
+export function SectionTitle({ icon, title }: { icon: ImageSourcePropType; title: string }) {
+  const colors = useMaterialColors();
+  return (
+    <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+      <ShapeIcon icon={icon} shape={shapes.Cookie4Sided} container={colors.secondaryContainer} content={colors.onSecondaryContainer} dp={40} />
+      <Text color={colors.onSurface} style={{ typography: 'titleLarge', fontWeight: '700' }}>
+        {title}
+      </Text>
+    </Row>
+  );
+}

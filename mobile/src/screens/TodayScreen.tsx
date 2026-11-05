@@ -19,6 +19,8 @@ import type { ImageSourcePropType } from 'react-native';
 import { api, Connection, GpuState, ItemDetail, Upcoming } from '../api';
 import { DetailSheet } from '../DetailSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { TodayKamil } from '../personal';
+import { ServerStatus } from '../ServerStatus';
 import { formatDate, isSoon, longDate, timeLeft } from '../format';
 import { icons } from '../icons';
 import { Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
@@ -31,6 +33,12 @@ const KINDS: Record<string, { icon: ImageSourcePropType; shape: BuiltinShape }> 
   discussion: { icon: icons.forum, shape: shapes.Cookie6Sided },
   event: { icon: icons.event, shape: shapes.SoftBurst },
 };
+
+/** Something else has the GPU or is waiting for it, so the student may want to step in from here. */
+function sharesGpu(gpu: GpuState): boolean {
+  return gpu.gpuOwner === 'job' || !!gpu.keepOffSeconds || !!gpu.prioritySeconds
+    || !!gpu.jobs?.some((job) => job.status === 'queued' || job.status === 'running');
+}
 
 function modelStatus(gpu: GpuState): string {
   if (gpu.llmActive) return 'Kamil hazır';
@@ -180,8 +188,10 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         <Header title="Bugün" subtitle={longDate(now)} />
         {error ? <Notice tone="error">{error}</Notice> : null}
         {taskError ? <Notice tone="error">{taskError}</Notice> : null}
+        <TodayKamil connection={connection} gpu={data?.gpu} onUpdated={refresh} />
         {data ? <Summary upcoming={data.upcoming} gpu={data.gpu} now={now} /> : null}
         <UpdatePanel connection={connection} onlyWhenAvailable />
+        {connection.mode === 'server' && data && sharesGpu(data.gpu) ? <ServerStatus connection={connection} /> : null}
         {!data && !error ? (
           <Row modifiers={[fillMaxWidth(), paddingAll(32)]} horizontalArrangement="center">
             <LoadingIndicator />

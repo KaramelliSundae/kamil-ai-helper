@@ -22,27 +22,17 @@ import { fillMaxSize, fillMaxWidth, height, padding, verticalScroll, weight } fr
 import { useEffect, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
-import { api, Connection, GeminiSettings, GpuState, saveConnection, ServerConnection } from '../api';
+import { ServerReport } from '../personal';
+import { ServerStatus } from '../ServerStatus';
+import { api, Connection, GeminiSettings, saveConnection, ServerConnection } from '../api';
 import { askForNotifications, notificationsAllowed, sendTestNotification } from '../background';
 import { icons } from '../icons';
 import { DEFAULT_GEMINI_MODEL, loadPhoneSettings } from '../phone/settings';
 import { connectPhone, forgetPhone } from '../phone/setup';
-import { Header, Notice, Panel, ShapeIcon, shapes } from '../ui';
+import { Header, Notice, Panel, ShapeIcon, shapes, SectionTitle } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
 
 type Props = { connection: Connection | null; onSaved: (connection: Connection | null) => void };
-
-function SectionTitle({ icon, title }: { icon: ImageSourcePropType; title: string }) {
-  const colors = useMaterialColors();
-  return (
-    <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-      <ShapeIcon icon={icon} shape={shapes.Cookie4Sided} container={colors.secondaryContainer} content={colors.onSecondaryContainer} dp={40} />
-      <Text color={colors.onSurface} style={{ typography: 'titleLarge', fontWeight: '700' }}>
-        {title}
-      </Text>
-    </Row>
-  );
-}
 
 function Field({ label, placeholder, state, onChange, secret, uri }: {
   label: string;
@@ -337,25 +327,12 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
 export function SettingsScreen({ connection, onSaved }: Props) {
   const colors = useMaterialColors();
   const [mode, setMode] = useState<'phone' | 'server'>(connection?.mode ?? 'phone');
-  const [gpu, setGpu] = useState<GpuState | null>(null);
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (connection?.mode === 'server') api.gpu(connection).then(setGpu, () => setGpu(null));
-    else setGpu(null);
     notificationsAllowed().then(setAllowed, () => setAllowed(false));
   }, [connection]);
-
-  const setGpuMode = async (next: string) => {
-    if (!connection) return;
-    setError(null);
-    try {
-      setGpu(await api.setGpuMode(connection, next));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Mod değiştirilemedi.');
-    }
-  };
 
   return (
     <Column modifiers={[fillMaxSize(), verticalScroll(), padding(16, 0, 16, 24)]} verticalArrangement={{ spacedBy: 14 }}>
@@ -380,6 +357,8 @@ export function SettingsScreen({ connection, onSaved }: Props) {
       </Panel>
 
       {mode === 'phone' ? <PhonePanel connection={connection} onSaved={onSaved} /> : <ServerPanel connection={connection} onSaved={onSaved} />}
+      {mode === 'server' && connection?.mode === 'server' ? <ServerReport connection={connection} /> : null}
+      {mode === 'server' && connection?.mode === 'server' ? <ServerStatus connection={connection} showModes /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerGeminiPanel connection={connection} /> : null}
 
       <Panel>
@@ -401,31 +380,6 @@ export function SettingsScreen({ connection, onSaved }: Props) {
       </Panel>
 
       {connection?.mode === 'server' ? <UpdatePanel connection={connection} /> : null}
-
-      {gpu && connection?.mode === 'server' ? (
-        <Panel>
-          <SectionTitle icon={icons.memory} title="GPU" />
-          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-            {gpu.llmActive ? "Kamil'in modeli yüklü." : gpu.blocked ?? "Kamil'in modeli kapalı, ilk soruda açılır."}
-          </Text>
-          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-            GPU'yu başka bir iş için boşaltacaksan Görsel'e al. Kamil'in yerel modeli bu modda cevap veremez.
-          </Text>
-          <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-            <SegmentedButton selected={gpu.mode === 'auto'} onClick={() => void setGpuMode('auto')}>
-              <SegmentedButton.Label>
-                <Text>Otomatik</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-            <SegmentedButton selected={gpu.mode === 'image'} onClick={() => void setGpuMode('image')}>
-              <SegmentedButton.Label>
-                <Text>Görsel</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-          </SingleChoiceSegmentedButtonRow>
-          {error ? <Notice tone="error">{error}</Notice> : null}
-        </Panel>
-      ) : null}
     </Column>
   );
 }

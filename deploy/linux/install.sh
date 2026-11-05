@@ -53,18 +53,9 @@ for dropins in "$here"/private/*.d; do
   install -m 644 "$dropins"/*.conf "/etc/systemd/system/$(basename "$dropins")/"
 done
 command -v restorecon >/dev/null && restorecon -R /etc/systemd/system/ai-ders-*
-if [[ -f "$here/50-ai-ders.rules" ]]; then
-  install -m 644 "$here/50-ai-ders.rules" /etc/polkit-1/rules.d/50-ai-ders.rules
-  command -v restorecon >/dev/null && restorecon /etc/polkit-1/rules.d/50-ai-ders.rules
-fi
 systemctl daemon-reload
 systemctl enable --now ai-ders-mailparse.socket
 grep -q '^KEEP_AWAKE=yes' /etc/ai-ders/env && systemctl enable --now ai-ders-keepawake.service
-# The GPU arbiter exists only where the local model shares a GPU with another program.
-if [[ -f /etc/systemd/system/ai-ders-arbiter.service ]]; then
-  systemctl enable --now ai-ders-arbiter.service
-  systemctl restart ai-ders-arbiter.service
-fi
 
 if [[ -f /etc/ai-ders/creds/api_token.cred ]]; then
   systemctl enable ai-ders-api.service

@@ -61,6 +61,10 @@ class ModeRequest(BaseModel):
     mode: str
 
 
+class PriorityRequest(BaseModel):
+    on: bool
+
+
 class GeminiSettingsRequest(BaseModel):
     key: str | None = Field(default=None, min_length=10, max_length=200)
     model: str | None = Field(default=None, max_length=80, pattern=r"^[\w.-]+$")
@@ -456,10 +460,23 @@ def create_app(
         return {"status": "discarded"}
 
     @app.get("/v1/gpu", dependencies=guarded)
-    def gpu() -> dict[str, Any]:
+    def gpu(store: Db) -> dict[str, Any]:
         if not gate:
             raise HTTPException(404, "bu sunucuda GPU kapısı yok")
-        return gpu_state()
+        return {**gpu_state(), "lastPollAt": store.get_meta("last_poll_at")}
+
+    @app.post("/v1/gpu/priority", dependencies=guarded)
+    def set_priority(request: PriorityRequest) -> dict[str, Any]:
+        """The student needs the local model now: work sharing the GPU steps aside for a while."""
+        if not gate:
+            raise HTTPException(404, "bu sunucuda GPU kapısı yok")
+        try:
+            answer = httpx.post(f"{gate}/priority", json={"on": request.on}, timeout=25.0)
+        except httpx.HTTPError as error:
+            raise HTTPException(503, "GPU kapısına ulaşılamıyor") from error
+        if answer.status_code != 200:
+            raise HTTPException(409, answer.json().get("reason") or "öncelik verilemedi")
+        return answer.json()
 
     @app.post("/v1/gpu", dependencies=guarded)
     def set_gpu(request: ModeRequest) -> dict[str, Any]:

@@ -62,7 +62,7 @@ ROUTES = [
     ("get", "/v1/images/" + "a" * 64), ("get", "/v1/settings/gemini"), ("put", "/v1/settings/gemini"),
     ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
-    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/remove"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
+    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
 ]
 
 
@@ -464,3 +464,8 @@ def test_chat_progress_tells_the_steps_of_that_question(client):
 
 def test_bad_turn_id_is_refused(client):
     assert client.post("/v1/chat", json={"text": "Selam", "turnId": "../x"}, headers=AUTH).status_code == 422
+
+
+def test_kamil_priority_needs_a_gate_and_reports_a_gate_that_is_down(client, api_settings, sends):
+    assert client.post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 404
+    assert gated(api_settings, sends).post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 503

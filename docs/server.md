@@ -71,6 +71,10 @@ default: mail tools are then not offered to Gemini at all.
 - **App updates.** Build the APK on the server and run `mobile/publish.sh`; phones in server mode update
   themselves.
 
+## Server status in the app
+
+On a server with a GPU gate (`GPU_GATE_URL`), **Ayarlar → Sunucu** shows what holds the GPU, free memory, the GPU's temperature and any jobs the gate runs. **Kamil'i öne al** gives the local model priority for 30 minutes. A server without a gate has none of this, and everything else works the same.
+
 ## Everyday commands
 
 ```sh

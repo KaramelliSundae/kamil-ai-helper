@@ -1,7 +1,7 @@
 [Unit]
 Description=AI Ders API for the phone
 Wants=network-online.target
-After=network-online.target tailscaled.service ai-ders-arbiter.service
+After=network-online.target tailscaled.service
 
 [Service]
 User=ai-ders

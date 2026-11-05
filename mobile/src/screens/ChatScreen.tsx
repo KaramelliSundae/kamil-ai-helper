@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api, ChatMessage, ChatSetup, Connection, Conversation, ModelId } from '../api';
 import { chat, useChat } from '../chatSession';
+import { ChatGreeter, WaitingFigure } from '../personal';
 import { dative, formatDate } from '../format';
 import { icons } from '../icons';
 import { Notice, rounded } from '../ui';
@@ -306,6 +307,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
 
       {messages.length === 0 ? (
         <Column modifiers={[fillMaxWidth(), weight(1), padding(24, 24, 24, 8)]} verticalArrangement={{ spacedBy: 8 }}>
+          <ChatGreeter />
           <Text color={colors.primary} style={{ typography: 'displaySmall', fontWeight: '700' }}>
             {setup?.firstName ? `Merhaba ${setup.firstName}` : 'Merhaba'}
           </Text>
@@ -349,7 +351,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
               </Row>
             ))}
             <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-              <LoadingIndicator />
+              {WaitingFigure ? <WaitingFigure /> : <LoadingIndicator />}
               <Text color={colors.onSurfaceVariant} modifiers={[weight(1)]} style={{ typography: 'bodyMedium' }}>
                 {session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…')}
               </Text>

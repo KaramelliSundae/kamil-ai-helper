@@ -147,6 +147,7 @@ export const api = {
     c.mode === 'phone' ? Promise.reject(new ApiError('GPU yok', 404)) : request<GpuState>(c, '/v1/gpu', 'GET'),
   setGpuMode: (c: Connection, mode: string) =>
     c.mode === 'phone' ? Promise.reject(new ApiError('GPU yok', 404)) : request<GpuState>(c, '/v1/gpu', 'POST', { mode }),
+  setKamilPriority: (c: ServerConnection, on: boolean) => request<GpuState>(c, '/v1/gpu/priority', 'POST', { on }),
   latestApp: (c: Connection) =>
     c.mode === 'phone' ? Promise.reject(new ApiError('sunucu yok', 404)) : request<Release>(c, '/v1/app/latest', 'GET'),
   // Gemini on a server: the key is checked by the server with Google and kept there.

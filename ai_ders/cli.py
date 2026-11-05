@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
-import importlib.util
 import logging
 import sys
 from datetime import UTC, datetime, timedelta
@@ -147,11 +145,6 @@ def google_auth(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
-def serve_arbiter(settings: Settings, args: argparse.Namespace) -> int:
-    importlib.import_module("ai_ders.arbiter").serve(settings.state_dir)
-    return 0
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(prog="ai-ders")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -169,9 +162,6 @@ def main() -> None:
     command = commands.add_parser("mode", help="show or set who the GPU is reserved for (needs GPU_GATE_URL)")
     command.add_argument("mode", nargs="?", choices=GPU_MODES)
     command.set_defaults(handler=mode)
-    # The GPU arbiter is an optional module for machines that share the GPU with another program.
-    if importlib.util.find_spec("ai_ders.arbiter") is not None:
-        commands.add_parser("arbiter", help="run the GPU arbiter").set_defaults(handler=serve_arbiter)
     google = commands.add_parser("google-auth", help="connect Google Tasks once")
     google.add_argument("--client-file", help="the client JSON downloaded from Google Cloud")
     google.set_defaults(handler=google_auth)

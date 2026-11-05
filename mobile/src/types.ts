@@ -14,6 +14,29 @@ export type GpuState = {
   llmActive: boolean;
   blocked: string | null;
   gateMissing?: boolean;
+  /** What holds the GPU now: the model, a job, image work, or nothing. */
+  gpuOwner?: 'kamil' | 'job' | 'image' | 'free';
+  prioritySeconds?: number;
+  keepOffSeconds?: number;
+  jobs?: ServerJob[];
+  system?: {
+    ramAvailableGib?: number;
+    ramTotalGib?: number;
+    vramUsedMib?: number;
+    vramTotalMib?: number;
+    gpuTempC?: number;
+    load?: number;
+    cores?: number;
+  };
+  lastPollAt?: string | null;
+};
+export type ServerJob = {
+  id: string;
+  label: string;
+  gpu: boolean;
+  status: string;
+  note: string;
+  finishedAt?: number | null;
 };
 export type Today = { upcoming: Upcoming[]; pendingDrafts: number; gpu: GpuState; tasksEnabled?: boolean };
 export type ItemDetail = {

@@ -1,0 +1,175 @@
+import {
+  Button,
+  Column,
+  OutlinedButton,
+  Row,
+  SegmentedButton,
+  SingleChoiceSegmentedButtonRow,
+  Text,
+  useMaterialColors,
+} from '@expo/ui/jetpack-compose';
+import { fillMaxWidth, weight } from '@expo/ui/jetpack-compose/modifiers';
+import { useCallback, useEffect, useState } from 'react';
+
+import { api, ServerConnection } from './api';
+import { ConfirmDialog } from './ConfirmDialog';
+import { icons } from './icons';
+import type { GpuState, ServerJob } from './types';
+import { Notice, Panel, SectionTitle } from './ui';
+
+const REFRESH_MS = 5000;
+const STATUS: Record<string, string> = {
+  running: 'Çalışıyor',
+  queued: 'Sırada',
+  done: 'Bitti',
+  failed: 'Hata verdi',
+  cancelled: 'İptal edildi',
+  interrupted: 'Durduruldu',
+};
+
+function headline(state: GpuState): string {
+  const running = state.jobs?.find((job) => job.gpu && job.status === 'running');
+  if (running) return `GPU'da hesaplama işi var: ${running.label || running.id}`;
+  if (state.llmActive) return 'Kamil GPU\'da, hazır.';
+  return state.blocked ?? 'Kamil diskte, ilk soruda açılır.';
+}
+
+function minutes(seconds: number): string {
+  return `${Math.max(1, Math.ceil(seconds / 60))} dk`;
+}
+
+function sinceLastCheck(iso: string): string {
+  const passed = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return passed < 1 ? 'az önce' : `${passed} dk önce`;
+}
+
+function Stat({ name, value }: { name: string; value: string }) {
+  const colors = useMaterialColors();
+  return (
+    <Row modifiers={[fillMaxWidth()]} horizontalArrangement="spaceBetween">
+      <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>{name}</Text>
+      <Text color={colors.onSurface} style={{ typography: 'bodyMedium', fontWeight: '600' }}>{value}</Text>
+    </Row>
+  );
+}
+
+function JobRow({ job }: { job: ServerJob }) {
+  const colors = useMaterialColors();
+  return (
+    <Row horizontalArrangement={{ spacedBy: 8 }}>
+      <Column modifiers={[weight(1)]}>
+        <Text color={colors.onSurface} maxLines={1} overflow="ellipsis" style={{ typography: 'bodyMedium', fontWeight: '600' }}>
+          {job.label || job.id}
+        </Text>
+        <Text color={colors.onSurfaceVariant} style={{ typography: 'bodySmall' }}>
+          {`${job.gpu ? 'GPU' : 'İşlemci'} · ${STATUS[job.status] ?? job.status}${job.note ? ` · ${job.note}` : ''}`}
+        </Text>
+      </Column>
+    </Row>
+  );
+}
+
+/** What the server is doing right now. Renders nothing on a server that does not share its GPU. */
+export function ServerStatus({ connection, showModes = false }: { connection: ServerConnection; showModes?: boolean }) {
+  const colors = useMaterialColors();
+  const [state, setState] = useState<GpuState | null>(null);
+  const [lastPollAt, setLastPollAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+
+  const load = useCallback(async () => {
+    const next = await api.gpu(connection);
+    setState(next);
+    setLastPollAt(next.lastPollAt ?? null);
+  }, [connection]);
+
+  useEffect(() => {
+    void load().catch(() => setState(null));
+    const ticker = setInterval(() => void load().catch(() => undefined), REFRESH_MS);
+    return () => clearInterval(ticker);
+  }, [load]);
+
+  const act = async (action: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await action();
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Sunucu bunu yapamadı.');
+    }
+  };
+
+  if (!state) return null;
+  const system = state.system;
+  const jobs = state.jobs ?? [];
+  const active = jobs.filter((job) => job.status === 'running' || job.status === 'queued');
+  const recent = jobs.filter((job) => !active.includes(job)).slice(-2).reverse();
+  const gpuJob = active.some((job) => job.gpu && job.status === 'running');
+  const priority = state.prioritySeconds ?? 0;
+  const setPriority = (on: boolean) => act(() => api.setKamilPriority(connection, on));
+
+  return (
+    <Panel>
+      <SectionTitle icon={icons.memory} title="Sunucu durumu" />
+      <Text color={colors.onSurface} style={{ typography: 'bodyLarge', fontWeight: '600' }}>{headline(state)}</Text>
+      {system?.ramAvailableGib !== undefined ? (
+        <Column verticalArrangement={{ spacedBy: 2 }}>
+          <Stat name="Boş bellek" value={`${system.ramAvailableGib} / ${system.ramTotalGib} GB`} />
+          <Stat name="GPU belleği" value={`${system.vramUsedMib} / ${system.vramTotalMib} MB`} />
+          <Stat name="GPU sıcaklığı" value={`${system.gpuTempC} °C`} />
+          <Stat name="İşlemci yükü" value={`${system.load} (${system.cores} çekirdek)`} />
+        </Column>
+      ) : null}
+      {lastPollAt ? <Stat name="Son kontrol" value={sinceLastCheck(lastPollAt)} /> : null}
+      {[...active, ...recent].map((job) => <JobRow key={job.id} job={job} />)}
+
+      {priority > 0 ? (
+        <>
+          <Text color={colors.primary} style={{ typography: 'labelLarge', fontWeight: '700' }}>
+            {`Kamil öncelikli, işler ${minutes(priority)} bekliyor`}
+          </Text>
+          <OutlinedButton onClick={() => void setPriority(false)}>
+            <Text>Önceliği bitir</Text>
+          </OutlinedButton>
+        </>
+      ) : active.length > 0 || !state.llmActive ? (
+        <Button onClick={() => (gpuJob ? setAsking(true) : void setPriority(true))}>
+          <Text>Kamil'i öne al</Text>
+        </Button>
+      ) : null}
+
+      {showModes ? (
+        <>
+          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+            GPU'yu başka bir iş için boşaltacaksan Görsel'e al. Kamil'in yerel modeli bu modda cevap veremez.
+          </Text>
+          <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
+            <SegmentedButton selected={state.mode === 'auto'} onClick={() => void act(() => api.setGpuMode(connection, 'auto'))}>
+              <SegmentedButton.Label>
+                <Text>Otomatik</Text>
+              </SegmentedButton.Label>
+            </SegmentedButton>
+            <SegmentedButton selected={state.mode === 'image'} onClick={() => void act(() => api.setGpuMode(connection, 'image'))}>
+              <SegmentedButton.Label>
+                <Text>Görsel</Text>
+              </SegmentedButton.Label>
+            </SegmentedButton>
+          </SingleChoiceSegmentedButtonRow>
+        </>
+      ) : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {asking ? (
+        <ConfirmDialog
+          title="Çalışan iş durdurulsun mu?"
+          text="Kamil 30 dakika öncelikli olur. GPU'daki iş durur, süre bitince baştan başlar; şimdiye kadarki ilerlemesi kaybolabilir."
+          confirm="Kamil'i öne al"
+          onConfirm={() => {
+            setAsking(false);
+            void setPriority(true);
+          }}
+          onCancel={() => setAsking(false)}
+        />
+      ) : null}
+    </Panel>
+  );
+}
