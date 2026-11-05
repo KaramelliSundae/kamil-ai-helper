@@ -125,6 +125,12 @@ holds now, not just what was true when it arrived: time left, *Süresi geçti*, 
 Slide a notification sideways, then tap **Sil** to delete it. While Kamil answers, the chat shows each step it
 is taking.
 
+## Sharing the GPU
+
+If the local model shares its GPU with other work, [Aziz](https://github.com/KaramelliSundae/aziz-the-manager) can manage
+that: he decides who gets the GPU, runs heavy jobs in order, and brings the model back as soon as it is free. Set
+`GPU_GATE_URL` to his address and the app shows the server's state under **Ayarlar → Sunucu**. Kamil works without him.
+
 ## Security
 
 Mail and Canvas content is treated as hostile input. A short version; the details are in
@@ -161,7 +167,7 @@ Set in `/etc/ai-ders/env` on the server; `deploy/env.example` has comments for e
 | `SCHOOL_DOMAIN` | Addresses under it count as your school's (default: the domain of `MAIL_USER`) |
 | `GEMINI_MODEL` | Default `gemini-3.8-flash` |
 | `LOCAL_LLM_URL` | Optional local OpenAI-compatible model server, for example `http://127.0.0.1:8080` |
-| `GPU_GATE_URL` | Optional, for machines that lend the GPU to another program |
+| `GPU_GATE_URL` | Optional, for machines that lend the GPU to another program; see [Sharing the GPU](#sharing-the-gpu) |
 | `TIMEZONE`, `REMINDER_HOURS`, `CRITICAL_HOURS`, `QUIET_START`, `QUIET_END` | Reminder timing and quiet hours |
 | `KEEP_AWAKE` | `yes` keeps a desktop or laptop server from sleeping |
 
