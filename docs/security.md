@@ -73,12 +73,20 @@ untrusted input, hold private data, and change lasting state all at once.
 `tests/test_agent.py` runs a scripted model that obeys every instruction in a malicious mail: no note is
 planted, no reminder is set, and its draft arrives with all three warnings.
 
+**Live steps in chat.** While Kamil works, the chat shows what it is doing ("Maillerde arıyor"). These are
+fixed labels chosen by tool name. No text from a mail or from the model's arguments reaches them, so a
+hostile text cannot write its own status on the screen.
+
 ## The other server services
 
 The model server (with a local model), the API and the watcher run with extra systemd hardening as well:
 no other processes in view, no writable-executable memory, ordinary service syscalls only. A local model
 server sees only the GPU devices, may only listen on its own port, and cannot read the state folder or the
 secrets, because the prompts it reads carry mail text.
+
+Pulling to refresh the notifications asks for a watcher round without giving the API any new power: it holds
+no Canvas token and cannot start services, it only writes a file that `ai-ders-watcher.path` watches, at most
+once a minute. The round runs in the watcher's own sandbox.
 
 The API listens on one private address (`API_HOST`) and every route needs the device token. Gemini keys
 entered in the app are checked with Google first and stored in the state folder with mode 0600, and are

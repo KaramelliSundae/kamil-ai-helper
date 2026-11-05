@@ -21,6 +21,7 @@ export * from './types';
 const MODE_KEY = 'mode';
 const SERVER_KEY = 'server';
 const TOKEN_KEY = 'token';
+const STEP_POLL_MS = 800;
 const REQUEST_MS = 200_000; // a local model may need time to load and answer
 
 /**
@@ -81,15 +82,37 @@ async function request<T>(connection: ServerConnection, path: string, method: st
 export const api = {
   today: (c: Connection) => (c.mode === 'phone' ? phoneApi.today() : request<Today>(c, '/v1/today', 'GET')),
   events: (c: Connection) => (c.mode === 'phone' ? phoneApi.events() : request<EventItem[]>(c, '/v1/events', 'GET')),
-  send: (c: Connection, text: string, conversationId: number | null, model: ModelId) =>
-    c.mode === 'phone'
-      ? phoneApi.send(text, conversationId)
-      : request<{ reply: string; conversationId: number }>(c, '/v1/chat', 'POST', {
-          text,
-          conversationId,
-          new: conversationId === null,
-          model,
-        }),
+  /** Asks for a fresh look at Canvas and mail now; the list is then read with `events`. */
+  refreshEvents: (c: Connection) =>
+    c.mode === 'phone' ? phoneApi.refreshEvents() : request<{ refreshed: boolean }>(c, '/v1/events/refresh', 'POST'),
+  deleteEvent: (c: Connection, id: number) =>
+    c.mode === 'phone' ? phoneApi.deleteEvent(id) : request<{ status: string }>(c, `/v1/events/${id}`, 'DELETE'),
+  send: (c: Connection, text: string, conversationId: number | null, model: ModelId, onSteps?: (steps: string[]) => void) => {
+    if (c.mode === 'phone') {
+      const steps: string[] = [];
+      return phoneApi.send(text, conversationId, (step) => {
+        if (steps[steps.length - 1] !== step) steps.push(step);
+        onSteps?.([...steps]);
+      });
+    }
+    // The answer is one long request, so the steps are asked for beside it. Missing steps never hurt the answer.
+    const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    let asking = false;
+    const ticker = setInterval(() => {
+      if (asking || !onSteps) return;
+      asking = true;
+      request<{ steps: string[] }>(c, `/v1/chat/progress/${turnId}`, 'GET')
+        .then(({ steps }) => onSteps(steps), () => undefined)
+        .finally(() => { asking = false; });
+    }, STEP_POLL_MS);
+    return request<{ reply: string; conversationId: number }>(c, '/v1/chat', 'POST', {
+      text,
+      conversationId,
+      new: conversationId === null,
+      model,
+      turnId,
+    }).finally(() => clearInterval(ticker));
+  },
   chatSetup: (c: Connection) => (c.mode === 'phone' ? phoneApi.chatSetup() : request<ChatSetup>(c, '/v1/chat/setup', 'GET')),
   conversations: (c: Connection) =>
     c.mode === 'phone' ? phoneApi.conversations() : request<Conversation[]>(c, '/v1/conversations', 'GET'),
@@ -107,6 +130,10 @@ export const api = {
     c.mode === 'phone'
       ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
       : request<{ status: string }>(c, '/v1/tasks', 'POST', { key }),
+  removeTask: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      : request<{ status: string }>(c, '/v1/tasks/remove', 'POST', { key }),
   drafts: (c: Connection) => (c.mode === 'phone' ? phoneApi.drafts() : request<Draft[]>(c, '/v1/drafts', 'GET')),
   sendDraft: (c: Connection, draft: Draft) =>
     c.mode === 'phone'

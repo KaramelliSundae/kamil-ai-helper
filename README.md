@@ -102,6 +102,13 @@ installs an update signed with the same key as the installed app, so switching k
 **Updates in server mode:** run `mobile/publish.sh` on the server after building there. Phones then show
 *Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256.
 
+## Notifications and chat
+
+Pull down on **Bildirimler** to check Canvas (and mail, on a server) right away. Each notification shows what
+holds now, not just what was true when it arrived: time left, *Süresi geçti*, *Teslim edildi* or the grade.
+Slide a notification sideways, then tap **Sil** to delete it. While Kamil answers, the chat shows each step it
+is taking.
+
 ## Security
 
 Mail and Canvas content is treated as hostile input. A short version; the details are in

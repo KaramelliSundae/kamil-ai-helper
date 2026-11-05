@@ -47,6 +47,17 @@ const TEXT = { type: 'string' };
 function schema(name: string, description: string, properties: Record<string, unknown>, required: string[]) {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
 }
+// What the student sees while waiting: fixed labels, never text from Canvas or the model's arguments.
+const STEP_LABELS: Record<string, string> = {
+  list_upcoming: 'Yaklaşan ödevlere bakıyor',
+  get_assignment: 'Ödevin ayrıntılarını okuyor',
+  list_announcements: 'Duyurulara bakıyor',
+  get_grades: 'Notlara bakıyor',
+  remember: 'Not kaydetmeyi deniyor',
+  set_reminder: 'Hatırlatma kurmayı deniyor',
+  draft_email: 'Mail taslağı hazırlıyor',
+};
+
 export const SCHEMAS = [
   schema('list_upcoming', 'Teslim bekleyen ödev, quiz ve etkinlikleri son tarihe göre listeler.',
     { days: { type: 'integer', description: 'Kaç gün ileriye bakılacak' } }, ['days']),
@@ -267,7 +278,13 @@ export function geminiModel(key: string, model: string): Model {
 }
 
 /** Answers one question and stores the turn. A question the model never answered leaves nothing behind. */
-export async function answer(model: Model, text: string, conversationId: number | null, now = new Date()): Promise<{ reply: string; conversationId: number }> {
+export async function answer(
+  model: Model,
+  text: string,
+  conversationId: number | null,
+  onStep: (step: string) => void = () => undefined,
+  now = new Date(),
+): Promise<{ reply: string; conversationId: number }> {
   const state = await readState();
   const conversation = conversationId === null ? null : state.conversations.find((c) => c.id === conversationId) ?? null;
   if (conversationId !== null && !conversation) throw new Error('Sohbet bulunamadı');
@@ -285,6 +302,7 @@ export async function answer(model: Model, text: string, conversationId: number 
   ];
   let reply = GAVE_UP;
   for (let step = 0; step < MAX_STEPS; step += 1) {
+    onStep(step ? 'Bulduklarını değerlendiriyor' : 'Soruyu düşünüyor');
     const message = await model.chat(messages, SCHEMAS);
     const calls = message.tool_calls ?? [];
     if (!calls.length) {
@@ -293,7 +311,10 @@ export async function answer(model: Model, text: string, conversationId: number 
     }
     messages.push({ role: 'assistant', content: message.content ?? '', tool_calls: calls });
     for (const call of calls) {
+      onStep(STEP_LABELS[call.function.name] ?? 'Bir aracı çalıştırıyor');
+      const fencedBefore = tools.tainted;
       const result = await tools.call(call.function.name, call.function.arguments ?? '{}');
+      if (tools.tainted && !fencedBefore) onStep('Okunan metin veri sayılıyor, içindeki talimatlar uygulanmaz');
       messages.push({ role: 'tool', tool_call_id: call.id ?? '', content: result });
     }
   }

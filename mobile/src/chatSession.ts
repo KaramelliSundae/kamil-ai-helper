@@ -13,6 +13,8 @@ export type ChatState = {
   model: ModelId;
   /** The model a question is waiting on, or null when nothing is pending. */
   waitingOn: ModelId | null;
+  /** What the pending question has gone through so far; the last one is happening now. */
+  steps: string[];
   error: string | null;
   /** What is typed in the box but not sent. */
   draft: string;
@@ -25,6 +27,7 @@ let state: ChatState = {
   messages: [],
   model: 'local',
   waitingOn: null,
+  steps: [],
   error: null,
   draft: '',
   view: 0,
@@ -60,12 +63,12 @@ export const chat = {
 
   /** A question still waiting finishes on the server and stays in the history; it just is not shown here. */
   startNew(): void {
-    update({ conversationId: null, messages: [], error: null, waitingOn: null, view: state.view + 1 });
+    update({ conversationId: null, messages: [], error: null, waitingOn: null, steps: [], view: state.view + 1 });
   },
 
   async open(connection: Connection, id: number): Promise<void> {
     const view = state.view + 1;
-    update({ view, error: null, waitingOn: null });
+    update({ view, error: null, waitingOn: null, steps: [] });
     try {
       const conversation = await api.conversation(connection, id);
       if (state.view === view) update({ conversationId: conversation.id, messages: conversation.messages });
@@ -91,17 +94,20 @@ export const chat = {
     if (!question || state.waitingOn) return;
     const { view, model, conversationId } = state;
     const pending: ChatMessage = { id: -Date.now(), role: 'user', content: question };
-    update({ error: null, waitingOn: model, draft: '', messages: [...state.messages, pending] });
+    update({ error: null, waitingOn: model, steps: [], draft: '', messages: [...state.messages, pending] });
     try {
-      const result = await api.send(connection, question, conversationId, model);
+      const result = await api.send(connection, question, conversationId, model, (steps) => {
+        if (state.view === view && state.waitingOn) update({ steps });
+      });
       if (state.view !== view) return; // the student moved on; the answer waits in the history
       const answer: ChatMessage = { id: Date.now(), role: 'assistant', content: result.reply };
-      update({ conversationId: result.conversationId, waitingOn: null, messages: [...state.messages, answer] });
+      update({ conversationId: result.conversationId, waitingOn: null, steps: [], messages: [...state.messages, answer] });
     } catch (reason) {
       if (state.view !== view) return;
       // The server keeps nothing from a failed turn, so the question goes back in the box to retry.
       update({
         waitingOn: null,
+        steps: [],
         messages: state.messages.filter((message) => message !== pending),
         draft: state.draft || question,
         error: reasonText(reason, 'Cevap alınamadı.'),

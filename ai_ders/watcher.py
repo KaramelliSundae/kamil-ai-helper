@@ -189,4 +189,5 @@ def run_poll(store: Store, settings: Settings, canvas: CanvasClient | None, mail
 
     result.events += add_reminders(store, settings, now)
     result.events += fire_user_reminders(store, now)
+    store.set_meta("last_poll_at", to_text(now))
     return result

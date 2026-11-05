@@ -53,6 +53,8 @@ export type EventItem = {
   body: string;
   url: string;
   createdAt: string;
+  /** The item as it is now; absent for events with no item behind them, such as alerts. */
+  current?: { title: string; course: string; dueAt: string | null; submitted: boolean; grade: string | null } | null;
   /** Phone mode: already announced by an exact alarm, so the event list shows it without notifying again. */
   silent?: boolean;
 };

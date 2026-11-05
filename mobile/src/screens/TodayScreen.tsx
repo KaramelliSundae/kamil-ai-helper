@@ -18,6 +18,7 @@ import type { ImageSourcePropType } from 'react-native';
 
 import { api, Connection, GpuState, ItemDetail, Upcoming } from '../api';
 import { DetailSheet } from '../DetailSheet';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { formatDate, isSoon, longDate, timeLeft } from '../format';
 import { icons } from '../icons';
 import { Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
@@ -36,11 +37,12 @@ function modelStatus(gpu: GpuState): string {
   return gpu.blocked ? `Kamil bekliyor: ${gpu.blocked}` : 'Kamil açılıyor';
 }
 
-function DueRow({ item, now, onOpen, onAddTask }: {
+function DueRow({ item, now, onOpen, onAddTask, onRemoveTask }: {
   item: Upcoming;
   now: number;
   onOpen: () => void;
   onAddTask?: () => void;
+  onRemoveTask?: () => void;
 }) {
   const colors = useMaterialColors();
   const soon = isSoon(item.dueAt, now);
@@ -76,8 +78,8 @@ function DueRow({ item, now, onOpen, onAddTask }: {
           </Row>
         </Column>
         {item.inTasks ? (
-          <IconButton enabled={false} onClick={() => undefined}>
-            <Icon source={icons.taskDone} size={22} tint={colors.primary} contentDescription="Google Tasks'ta" />
+          <IconButton enabled={!!onRemoveTask} onClick={() => onRemoveTask?.()}>
+            <Icon source={icons.taskDone} size={22} tint={colors.primary} contentDescription="Google Tasks'ta, çıkarmak için dokun" />
           </IconButton>
         ) : onAddTask ? (
           <FilledTonalIconButton onClick={onAddTask}>
@@ -128,6 +130,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
   const { data, error, refreshing, refresh } = useLoad(load);
   const [open, setOpen] = useState<Upcoming | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Upcoming | null>(null);
   const now = Date.now();
   const tasksEnabled = !!data?.tasksEnabled;
 
@@ -144,6 +147,17 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
     [connection, refresh],
   );
 
+  const removeTask = async (item: Upcoming) => {
+    setRemoving(null);
+    setTaskError(null);
+    try {
+      await api.removeTask(connection, item.key);
+      void refresh();
+    } catch (reason) {
+      setTaskError(reason instanceof Error ? reason.message : "Google Tasks'tan çıkarılamadı.");
+    }
+  };
+
   const renderRow = useCallback(
     ({ item }: { item: Upcoming }) => (
       <DueRow
@@ -151,6 +165,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         now={Date.now()}
         onOpen={() => setOpen(item)}
         onAddTask={tasksEnabled ? () => void addTask(item) : undefined}
+        onRemoveTask={tasksEnabled ? () => setRemoving(item) : undefined}
       />
     ),
     [addTask, tasksEnabled],
@@ -191,11 +206,21 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
           {renderRow}
         </LazyColumn.Items>
       </LazyColumn>
+      {removing ? (
+        <ConfirmDialog
+          title="Google Tasks'tan çıkarılsın mı?"
+          text={`"${removing.title}" görev listenden silinecek. Canvas'taki ödevine bir şey olmaz.`}
+          confirm="Çıkar"
+          onConfirm={() => void removeTask(removing)}
+          onCancel={() => setRemoving(null)}
+        />
+      ) : null}
       {open ? (
         <DetailSheet
           connection={connection}
           target={{ key: open.key, title: open.title, url: open.url }}
-          tasksEnabled={tasksEnabled && !open.inTasks}
+          tasksEnabled={tasksEnabled}
+          inTasks={open.inTasks}
           onClose={() => {
             setOpen(null);
             void refresh();

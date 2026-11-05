@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -60,7 +62,7 @@ ROUTES = [
     ("get", "/v1/images/" + "a" * 64), ("get", "/v1/settings/gemini"), ("put", "/v1/settings/gemini"),
     ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
-    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("get", "/v1/chat/setup"),
+    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/remove"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
 ]
 
 
@@ -185,6 +187,37 @@ def test_events_are_newest_first(client, db):
     db.add_event("k", "new", "high", "Eski", "", "", NOW)
     db.add_event("k", "new", "high", "Yeni", "", "", NOW)
     assert [e["title"] for e in client.get("/v1/events", headers=AUTH).json()] == ["Yeni", "Eski"]
+
+
+def test_deleted_event_is_gone_and_its_id_is_not_reused(client, db):
+    db.add_event("k", "new", "high", "Sil", "", "", NOW)
+    event_id = client.get("/v1/events", headers=AUTH).json()[0]["id"]
+    assert client.delete(f"/v1/events/{event_id}", headers=AUTH).status_code == 200
+    assert client.get("/v1/events", headers=AUTH).json() == []
+    db.add_event("k", "new", "high", "Sonraki", "", "", NOW)
+    assert client.get("/v1/events", headers=AUTH).json()[0]["id"] > event_id
+
+
+def test_event_carries_its_item_as_it_is_now(client, db):
+    db.upsert(Item(key="assignment:1", kind="assignment", title="HW1", course="COMP303", url="u", due_at=NOW), NOW)
+    db.add_event("assignment:1", "reminder", "high", "24 saat kaldı: COMP303: HW1", "", "u", NOW)
+    db.add_event("system:Canvas", "alert", "critical", "Canvas takibi çalışmıyor", "", "", NOW)
+    alert, reminder = client.get("/v1/events", headers=AUTH).json()
+    assert alert["current"] is None
+    assert reminder["current"]["dueAt"] and reminder["current"]["submitted"] is False
+
+
+def test_refresh_asks_the_watcher_and_returns_when_a_round_finished(client, db, api_settings, monkeypatch):
+    monkeypatch.setattr("ai_ders.api.POLL_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr("ai_ders.api.POLL_CHECK_SECONDS", 0.01)
+    request = api_settings.state_dir / "poll-request"
+    assert client.post("/v1/events/refresh", headers=AUTH).json() == {"refreshed": False}  # no watcher answered
+    assert request.exists()
+
+    db.set_meta("last_poll_at", datetime.now(UTC).isoformat())
+    request.unlink()
+    assert client.post("/v1/events/refresh", headers=AUTH).json() == {"refreshed": True}
+    assert not request.exists()  # a round just ran: Canvas is left alone
 
 
 def test_event_says_what_it_is_about(client, db):
@@ -330,10 +363,17 @@ def test_unknown_item_is_a_404(client):
 class FakeTasks:
     def __init__(self):
         self.added = []
+        self.removed = []
+        self.fail_remove = False
 
     def add(self, title, notes, due):
         self.added.append((title, notes, due))
         return f"task-{len(self.added)}"
+
+    def remove(self, task_id):
+        if self.fail_remove:
+            raise httpx.ConnectError("down")
+        self.removed.append(task_id)
 
 
 def test_google_tasks_not_connected_is_a_clear_409(client, db):
@@ -389,3 +429,38 @@ def test_gemini_answers_without_the_mail_tools(api_settings, sends):
 def test_setup_greets_by_first_name(api_settings, sends):
     client = TestClient(create_app(replace(api_settings, student_name="AYŞE NUR YILMAZ"), Llm(), sends))
     assert client.get("/v1/chat/setup", headers=AUTH).json()["firstName"] == "Ayşe"
+
+
+def test_task_can_be_taken_back_out_and_added_again(api_settings, sends, db):
+    db.upsert(Item(key="assignment:1", kind="assignment", title="HW1", course="COMP303", url="u"), NOW)
+    tasks = FakeTasks()
+    client = TestClient(create_app(api_settings, Llm(), sends, tasks))
+    client.post("/v1/tasks", json={"key": "assignment:1"}, headers=AUTH)
+
+    assert client.post("/v1/tasks/remove", json={"key": "assignment:1"}, headers=AUTH).json() == {"status": "removed"}
+    assert len(tasks.removed) == 1
+    assert client.post("/v1/tasks/remove", json={"key": "assignment:1"}, headers=AUTH).json() == {"status": "absent"}
+    assert len(tasks.removed) == 1  # nothing of ours left to remove
+    assert client.post("/v1/tasks", json={"key": "assignment:1"}, headers=AUTH).json() == {"status": "added"}
+
+
+def test_failed_removal_keeps_the_record(api_settings, sends, db):
+    db.upsert(Item(key="assignment:1", kind="assignment", title="HW1", course="COMP303", url="u"), NOW)
+    tasks = FakeTasks()
+    tasks.fail_remove = True
+    client = TestClient(create_app(api_settings, Llm(), sends, tasks))
+    client.post("/v1/tasks", json={"key": "assignment:1"}, headers=AUTH)
+    assert client.post("/v1/tasks/remove", json={"key": "assignment:1"}, headers=AUTH).status_code == 502
+    assert db.get_meta("gtask:assignment:1")
+
+
+def test_chat_progress_tells_the_steps_of_that_question(client):
+    turn = "turn-12345"
+    assert client.get(f"/v1/chat/progress/{turn}", headers=AUTH).json() == {"steps": []}
+    client.post("/v1/chat", json={"text": "Selam", "turnId": turn}, headers=AUTH)
+    assert client.get(f"/v1/chat/progress/{turn}", headers=AUTH).json() == {"steps": ["Soruyu düşünüyor"]}
+    assert client.get("/v1/chat/progress/baska-soru", headers=AUTH).json() == {"steps": []}
+
+
+def test_bad_turn_id_is_refused(client):
+    assert client.post("/v1/chat", json={"text": "Selam", "turnId": "../x"}, headers=AUTH).status_code == 422

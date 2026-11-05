@@ -1,0 +1,10 @@
+[Unit]
+Description=AI Ders watcher round when the app asks for one
+
+[Path]
+# The API writes this file on a pull-to-refresh; it has no Canvas token or permission to start services itself.
+PathChanged=/var/lib/ai-ders/poll-request
+Unit=ai-ders-watcher.service
+
+[Install]
+WantedBy=multi-user.target

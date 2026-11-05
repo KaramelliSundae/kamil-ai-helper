@@ -45,6 +45,30 @@ def test_task_without_a_due_date_has_none():
     assert GoogleTasks(CREDS, client_for(handler)).add("Duyuru", "", None) == "task-2"
 
 
+@pytest.mark.parametrize("status", [204, 404, 410])
+def test_removing_a_task_also_accepts_one_already_gone(status):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "tok"})
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(status)
+
+    GoogleTasks(CREDS, client_for(handler)).remove("a/b")
+    assert seen == [("DELETE", f"{TASKS_URL}/a%2Fb")]
+
+
+def test_failed_removal_is_an_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == TOKEN_URL:
+            return httpx.Response(200, json={"access_token": "tok"})
+        return httpx.Response(500)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        GoogleTasks(CREDS, client_for(handler)).remove("t")
+
+
 def test_revoked_permission_says_to_reconnect():
     tasks = GoogleTasks(CREDS, client_for(lambda request: httpx.Response(400, json={"error": "invalid_grant"})))
     with pytest.raises(GoogleTasksError, match="yeniden kur"):

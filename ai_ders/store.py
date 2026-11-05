@@ -203,6 +203,10 @@ class Store:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
+    def delete_meta(self, key: str) -> None:
+        self.db.execute("DELETE FROM meta WHERE key = ?", (key,))
+        self.db.commit()
+
     def set_meta(self, key: str, value: str) -> None:
         self.db.execute(
             "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -274,6 +278,11 @@ class Store:
             "SELECT * FROM items WHERE due_at >= ? AND due_at <= ? AND submitted = 0 ORDER BY due_at",
             (to_text(start), to_text(end)),
         ).fetchall()
+
+    def delete_event(self, event_id: int) -> None:
+        """Ids are never reused (AUTOINCREMENT), so the phone cannot mistake a later event for this one."""
+        self.db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        self.db.commit()
 
     def recent_events(self, limit: int) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()

@@ -9,6 +9,9 @@ import hmac
 import json
 import os
 import re
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -42,6 +45,8 @@ class ChatRequest(BaseModel):
     # A new chat in the app. Without it and without an id, the latest conversation goes on (older app versions).
     new: bool = False
     model: Literal["local", "gemini"] = "local"
+    # Chosen by the app, so it can ask how this question is going while it waits.
+    turnId: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{8,64}$")
 
 
 class TaskRequest(BaseModel):
@@ -62,10 +67,21 @@ class GeminiSettingsRequest(BaseModel):
     mailAllowed: bool | None = None
 
 
-def event_json(row: Any) -> dict[str, Any]:
+TURNS_KEPT = 8
+POLL_WAIT_SECONDS = 20.0
+POLL_CHECK_SECONDS = 0.5
+POLL_COOLDOWN_SECONDS = 60  # pulling again and again must not hammer Canvas and the mail server
+
+
+def event_json(row: Any, item: Any = None) -> dict[str, Any]:
+    """An event is what happened then; `current` is its item now, so the app can say what still holds."""
     return {
         "id": row["id"], "itemKey": row["item_key"], "type": row["type"], "level": row["level"],
         "title": row["title"], "body": row["body"], "url": row["url"], "createdAt": row["created_at"],
+        "current": {
+            "title": item["title"], "course": item["course"], "dueAt": item["due_at"],
+            "submitted": bool(item["submitted"]), "grade": item["grade"],
+        } if item is not None else None,
     }
 
 
@@ -156,6 +172,8 @@ def create_app(
             store.close()
 
     guarded = [Depends(authorize)]
+    turns: OrderedDict[str, list[str]] = OrderedDict()  # what each recent question is doing, in memory only
+    turns_lock = threading.Lock()
     Db = Annotated[Store, Depends(open_store)]
 
     @app.get("/v1/today", dependencies=guarded)
@@ -196,9 +214,48 @@ def create_app(
         store.set_meta(marker, task_id)
         return {"status": "added"}
 
+    @app.post("/v1/tasks/remove", dependencies=guarded)
+    def remove_task(request: TaskRequest, store: Db) -> dict[str, str]:
+        """Takes out only a task Kamil itself added: the id comes from our record, never from the request."""
+        if tasks is None:
+            raise HTTPException(409, "Google Tasks bağlı değil")
+        marker = f"gtask:{request.key}"
+        task_id = store.get_meta(marker)
+        if not task_id:
+            return {"status": "absent"}
+        try:
+            tasks.remove(task_id)
+        except GoogleTasksError as error:
+            raise HTTPException(502, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(502, "Google Tasks'a ulaşılamadı") from error
+        store.delete_meta(marker)
+        return {"status": "removed"}
+
     @app.get("/v1/events", dependencies=guarded)
     def events(store: Db, limit: int = 60) -> list[dict[str, Any]]:
-        return [event_json(row) for row in store.recent_events(min(limit, 200))]
+        return [event_json(row, store.get_item(row["item_key"])) for row in store.recent_events(min(limit, 200))]
+
+    @app.post("/v1/events/refresh", dependencies=guarded)
+    def refresh_events(store: Db) -> dict[str, bool]:
+        """Asks for a watcher round now and waits for it. This service holds no Canvas token: it only writes a
+        file that ai-ders-watcher.path watches, so the round runs in the watcher's own sandbox."""
+        before = store.get_meta("last_poll_at")
+        last = to_time(before)
+        if last and datetime.now(UTC) - last < timedelta(seconds=POLL_COOLDOWN_SECONDS):
+            return {"refreshed": True}
+        (settings.state_dir / "poll-request").write_text(datetime.now(UTC).isoformat(), encoding="utf-8")
+        deadline = time.monotonic() + POLL_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            if store.get_meta("last_poll_at") != before:
+                return {"refreshed": True}
+            time.sleep(POLL_CHECK_SECONDS)
+        return {"refreshed": False}
+
+    @app.delete("/v1/events/{event_id}", dependencies=guarded)
+    def delete_event(event_id: int, store: Db) -> dict[str, str]:
+        store.delete_event(event_id)
+        return {"status": "deleted"}
 
     @app.get("/v1/items/{key:path}", dependencies=guarded)
     def item(key: str, store: Db) -> dict[str, Any]:
@@ -237,6 +294,21 @@ def create_app(
         latest = store.latest_conversation()
         return messages(store, latest) if latest is not None else []
 
+    def note_step(turn_id: str | None, step: str) -> None:
+        if turn_id is None:
+            return
+        with turns_lock:
+            steps = turns.setdefault(turn_id, [])
+            if not steps or steps[-1] != step:
+                steps.append(step)
+            while len(turns) > TURNS_KEPT:  # only the latest matter; a finished turn needs no clean-up of its own
+                turns.popitem(last=False)
+
+    @app.get("/v1/chat/progress/{turn_id}", dependencies=guarded)
+    def chat_progress(turn_id: str) -> dict[str, list[str]]:
+        with turns_lock:
+            return {"steps": list(turns.get(turn_id, []))}
+
     @app.post("/v1/chat", dependencies=guarded)
     def chat(request: ChatRequest, store: Db) -> dict[str, Any]:
         conversation_id = request.conversationId
@@ -255,7 +327,10 @@ def create_app(
             school_domain=settings.school_domain,
         )
         try:
-            result = answer(store, gemini if cloud else llm, tools, request.text, conversation_id)
+            result = answer(
+                store, gemini if cloud else llm, tools, request.text, conversation_id,
+                on_step=lambda step: note_step(request.turnId, step),
+            )
         except LlmBusy as busy:
             raise HTTPException(503, str(busy)) from busy
         return {"reply": result.reply, "conversationId": result.conversation_id}

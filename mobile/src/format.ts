@@ -37,6 +37,14 @@ export function timeLeft(iso: string, now: number): string {
   return `${Math.round(hours / 24)} gün kaldı`;
 }
 
+export function timeAgo(iso: string, now: number): string {
+  const minutes = Math.round((now - new Date(iso).getTime()) / 60000);
+  if (minutes < 60) return `${Math.max(minutes, 1)} dk önce`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} saat önce`;
+  return `${Math.round(hours / 24)} gün önce`;
+}
+
 export function isSoon(iso: string, now: number): boolean {
   return new Date(iso).getTime() - now < 24 * 3600 * 1000;
 }

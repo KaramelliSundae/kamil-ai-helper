@@ -31,6 +31,7 @@ import { Linking, useWindowDimensions } from 'react-native';
 
 import { api, Attachment, Connection, ItemDetail } from './api';
 import { appConfig } from './config';
+import { ConfirmDialog } from './ConfirmDialog';
 import { formatDate, tidyText, timeLeft } from './format';
 import { icons } from './icons';
 import { LinkDialog, MailBody } from './MailBody';
@@ -55,10 +56,11 @@ const UNREADABLE = '(açılamayan mail)';
 const SHEET_GUTTER = 20;
 const CARD_PADDING = 20;
 
-export function DetailSheet({ connection, target, tasksEnabled, onClose, onSolve }: {
+export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose, onSolve }: {
   connection: Connection;
   target: DetailTarget;
   tasksEnabled?: boolean;
+  inTasks?: boolean;
   onClose: () => void;
   /** Present when Gemini is connected. */
   onSolve?: (detail: ItemDetail) => void;
@@ -67,6 +69,8 @@ export function DetailSheet({ connection, target, tasksEnabled, onClose, onSolve
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
+  const [taskAdded, setTaskAdded] = useState(!!inTasks);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk } | null>(null);
 
@@ -106,8 +110,21 @@ export function DetailSheet({ connection, target, tasksEnabled, onClose, onSolve
     try {
       const { status } = await api.addTask(connection, target.key);
       setNote(status === 'exists' ? "Zaten Google Tasks'ta." : "Google Tasks'a eklendi.");
+      setTaskAdded(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Eklenemedi.');
+    }
+  };
+
+  const removeTask = async () => {
+    setConfirmRemove(false);
+    setError(null);
+    try {
+      await api.removeTask(connection, target.key);
+      setNote("Google Tasks'tan çıkarıldı.");
+      setTaskAdded(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Çıkarılamadı.');
     }
   };
 
@@ -162,7 +179,13 @@ export function DetailSheet({ connection, target, tasksEnabled, onClose, onSolve
               <Text modifiers={[paddingAll(4)]}>Gemini ile çöz</Text>
             </Button>
           ) : null}
-          {work && tasksEnabled ? (
+          {work && tasksEnabled && taskAdded ? (
+            <OutlinedButton onClick={() => setConfirmRemove(true)}>
+              <Icon source={icons.taskDone} size={18} />
+              <Text modifiers={[paddingAll(4)]}>Google Tasks'tan çıkar</Text>
+            </OutlinedButton>
+          ) : null}
+          {work && tasksEnabled && !taskAdded ? (
             <FilledTonalButton onClick={() => void addTask()}>
               <Icon source={icons.addTask} size={18} />
               <Text modifiers={[paddingAll(4)]}>Google Tasks'a ekle</Text>
@@ -182,6 +205,15 @@ export function DetailSheet({ connection, target, tasksEnabled, onClose, onSolve
         </FlowRow>
       </Column>
       {asking ? <LinkDialog target={asking} onClose={() => setAsking(null)} /> : null}
+      {confirmRemove ? (
+        <ConfirmDialog
+          title="Google Tasks'tan çıkarılsın mı?"
+          text={`"${target.title}" görev listenden silinecek. Canvas'taki ödevine bir şey olmaz.`}
+          confirm="Çıkar"
+          onConfirm={() => void removeTask()}
+          onCancel={() => setConfirmRemove(false)}
+        />
+      ) : null}
     </ModalBottomSheet>
   );
 }

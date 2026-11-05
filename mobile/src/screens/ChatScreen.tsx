@@ -47,6 +47,8 @@ export function markdownSpans(content: string): { text: string; bold: boolean }[
   return text.split(/\*\*([\s\S]+?)\*\*/g).map((part, index) => ({ text: part, bold: index % 2 === 1 })).filter((span) => span.text);
 }
 
+const VISIBLE_STEPS = 3; // finished steps kept above the current one, so the box stays small
+
 function Message({ message }: { message: ChatMessage }) {
   const colors = useMaterialColors();
   if (message.role === 'user') {
@@ -337,12 +339,22 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
 
       <Column modifiers={[padding(12, 4, 12, 10)]} verticalArrangement={{ spacedBy: 8 }}>
         {sending ? (
-          <Row modifiers={[padding(8, 0, 0, 0)]} horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-            <LoadingIndicator />
-            <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-              {session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…'}
-            </Text>
-          </Row>
+          <Column modifiers={[padding(8, 0, 0, 0)]} verticalArrangement={{ spacedBy: 2 }}>
+            {session.steps.slice(-(VISIBLE_STEPS + 1), -1).map((step, index) => (
+              <Row key={`${index}-${step}`} horizontalArrangement={{ spacedBy: 8 }} verticalAlignment="center">
+                <Icon source={icons.taskDone} size={16} tint={colors.outline} />
+                <Text color={colors.outline} style={{ typography: 'bodySmall' }}>
+                  {step}
+                </Text>
+              </Row>
+            ))}
+            <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+              <LoadingIndicator />
+              <Text color={colors.onSurfaceVariant} modifiers={[weight(1)]} style={{ typography: 'bodyMedium' }}>
+                {session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…')}
+              </Text>
+            </Row>
+          </Column>
         ) : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
         {noModel ? <Notice>Kamil'le konuşmak için Ayarlar'dan bir Gemini API anahtarı gir.</Notice> : null}

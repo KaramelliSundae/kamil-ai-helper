@@ -43,7 +43,7 @@ systemd-creds setup >/dev/null 2>&1 || true
 
 echo "==> services"
 shopt -s nullglob
-units=("$here"/ai-ders-*.service "$here"/ai-ders-*.socket "$here"/ai-ders-*.timer)
+units=("$here"/ai-ders-*.service "$here"/ai-ders-*.socket "$here"/ai-ders-*.timer "$here"/ai-ders-*.path)
 for unit in "${units[@]}"; do
   install -m 644 "$unit" "/etc/systemd/system/$(basename "$unit")"
 done
@@ -72,7 +72,7 @@ if [[ -f /etc/ai-ders/creds/api_token.cred ]]; then
   echo "==> API running"
 fi
 if [[ -f /etc/ai-ders/creds/canvas_token.cred ]]; then
-  systemctl enable --now ai-ders-watcher.timer ai-ders-digest.timer
+  systemctl enable --now ai-ders-watcher.timer ai-ders-watcher.path ai-ders-digest.timer
   echo "==> timers enabled"
 else
   echo "==> no secrets yet: run set-secrets.sh, edit /etc/ai-ders/env, then run this again"

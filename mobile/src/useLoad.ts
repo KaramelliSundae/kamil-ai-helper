@@ -6,10 +6,10 @@ export function useLoad<T>(load: () => Promise<T>) {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (loader: () => Promise<T> = load) => {
     setRefreshing(true);
     try {
-      setData(await load());
+      setData(await loader());
       setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Beklenmeyen bir hata oldu.');
@@ -22,5 +22,5 @@ export function useLoad<T>(load: () => Promise<T>) {
     void refresh();
   }, [refresh]);
 
-  return { data, error, refreshing, refresh };
+  return { data, setData, error, refreshing, refresh };
 }

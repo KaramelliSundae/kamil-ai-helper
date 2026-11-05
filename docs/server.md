@@ -59,10 +59,13 @@ default: mail tools are then not offered to Gemini at all.
   Ollama, LM Studio) and set `LOCAL_LLM_URL`, for example `http://127.0.0.1:8080`. The app then offers both
   models; mail stays on your machine with the local one.
 - **Google Tasks.** Create a Google Cloud project, enable the Tasks API, create an OAuth client of type
-  *Desktop app*, and publish the consent screen ("In production"; in "Testing" Google drops the permission
-  after 7 days). Download the client JSON, copy it to the server and run
+  *Desktop app*, and press *Publish app* under *Audience* ("In production"; in "Testing" Google drops the
+  permission after 7 days). You don't need a website or Google's verification for your own use: ignore the
+  "requires verification" banner and accept the "unverified app" warning when you give permission. Download
+  the client JSON, copy it to the server and run
   `sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh /path/to/client.json`. The script deletes the
-  file afterwards.
+  file afterwards. Deadlines on the **Bugün** screen then have a button to add them to Google Tasks; tapping
+  the check mark takes them out again, after asking.
 - **Digest by mail.** Set `NOTIFY_EMAIL` and `SMTP_HOST`; a summary arrives each morning.
 - **Keep a PC awake.** `KEEP_AWAKE=yes` stops a desktop or laptop server from going to sleep.
 - **App updates.** Build the APK on the server and run `mobile/publish.sh`; phones in server mode update

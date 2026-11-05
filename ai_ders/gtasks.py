@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from getpass import getpass
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
 
@@ -66,6 +66,15 @@ class GoogleTasks:
         )
         response.raise_for_status()
         return response.json()["id"]
+
+
+    def remove(self, task_id: str) -> None:
+        """Already gone from Google Tasks (deleted by hand) counts as removed."""
+        response = self.client.delete(
+            f"{TASKS_URL}/{quote(task_id, safe='')}", headers={"Authorization": f"Bearer {self._access_token()}"}
+        )
+        if response.status_code not in (404, 410):
+            response.raise_for_status()
 
 
 def read_client_file(path: str) -> tuple[str, str]:

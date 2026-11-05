@@ -55,7 +55,27 @@ export const phoneApi = {
 
   async events(): Promise<EventItem[]> {
     const state = await readState();
-    return [...state.events].reverse().slice(0, EVENT_LIMIT);
+    return [...state.events].reverse().slice(0, EVENT_LIMIT).map((event) => {
+      const item = state.items[event.itemKey];
+      return {
+        ...event,
+        current: item
+          ? { title: item.title, course: item.course, dueAt: item.dueAt, submitted: item.submitted, grade: item.grade }
+          : null,
+      };
+    });
+  },
+
+  async refreshEvents(): Promise<{ refreshed: boolean }> {
+    const result = await poll();
+    return { refreshed: !result.error };
+  },
+
+  async deleteEvent(id: number): Promise<{ status: string }> {
+    await updateState((state) => {
+      state.events = state.events.filter((event) => event.id !== id);
+    });
+    return { status: 'deleted' };
   },
 
   async item(key: string): Promise<ItemDetail> {
@@ -79,11 +99,11 @@ export const phoneApi = {
     };
   },
 
-  async send(text: string, conversationId: number | null): Promise<{ reply: string; conversationId: number }> {
+  async send(text: string, conversationId: number | null, onStep?: (step: string) => void): Promise<{ reply: string; conversationId: number }> {
     const settings = await loadPhoneSettings();
     if (!settings.geminiKey) throw new ApiError("Sohbet için Ayarlar'dan Gemini API anahtarını gir.", 409);
     try {
-      return await answer(geminiModel(settings.geminiKey, settings.geminiModel), text, conversationId);
+      return await answer(geminiModel(settings.geminiKey, settings.geminiModel), text, conversationId, onStep);
     } catch (error) {
       throw new ApiError(error instanceof GeminiError || error instanceof Error ? error.message : 'Cevap alınamadı.', 503);
     }
