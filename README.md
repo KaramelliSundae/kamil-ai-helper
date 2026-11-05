@@ -115,7 +115,8 @@ Kamil is a butler who lives on **Bugün**: his house on the left, his computer i
 comes out when the app opens, says hello and goes back to work. Tap him and he turns to you, then really checks Canvas
 and mail at the computer, writes your nearest deadlines on the board, and tells you what he found. While the local model
 is off the GPU he sleeps in his house, behind a door that turns to glass. In **Sohbet** he paces up and down while an answer
-is on its way and says each step as it starts. Tap him too many times and he will tell you what he thinks of that.
+is on its way and says each step as it starts. Tap him too many times and he will tell you what he thinks of that. There is also an old acquaintance of his who drops
+by now and then, if you know how to call him.
 
 ## Notifications and chat
 

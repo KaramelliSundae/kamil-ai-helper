@@ -524,3 +524,488 @@ export const KAMIL: RobotView[] = [
   },
 ];
 export const STAGE = { src: require('./stage.webp'), w: 1080, h: 729, ox: 540.0, oy: 668.25, unit: 135, elev: 0.1571, door: { src: require('./door.webp'), x: 39, y: 308, w: 259, h: 348 }, shadow: require('./shadow.webp') };
+export const HUSAMETTIN: RobotView[] = [
+  {
+    yaw: 20,
+    body: { src: require('./h_y20_body.webp'), x: 145, y: 189, w: 116, h: 137 },
+    armA: { src: require('./h_y20_armA.webp'), x: 239, y: 214, w: 62, h: 121 },
+    armB: { src: require('./h_y20_armB.webp'), x: 114, y: 220, w: 53, h: 125 },
+    legs: { src: require('./h_y20_legs.webp'), x: 150, y: 297, w: 106, h: 166 },
+    pivots: {
+      armA: [
+        252.33,
+        228.24,
+      ],
+      armB: [
+        153.67,
+        233.85,
+      ],
+      legA: [
+        225.36,
+        303.06,
+      ],
+      legB: [
+        180.64,
+        305.6,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        182.89,
+        195.44,
+      ],
+      fig: [
+        103.76,
+        191.69,
+      ],
+    },
+    head: [
+      { src: require('./h_y20_head0.webp'), x: 136, y: 84, w: 145, h: 130 },
+      { src: require('./h_y20_head1.webp'), x: 129, y: 74, w: 147, h: 138 },
+      { src: require('./h_y20_head2.webp'), x: 121, y: 57, w: 149, h: 155 },
+      { src: require('./h_y20_head3.webp'), x: 112, y: 38, w: 149, h: 174 },
+    ],
+    eyes: [
+      [
+        {
+          x: 203.25,
+          y: 164.43,
+          r: 30.1,
+          sx: 0.929,
+        },
+        {
+          x: 254.53,
+          y: 161.51,
+          r: 30.1,
+          sx: 0.929,
+        },
+      ],
+      [
+        {
+          x: 199.05,
+          y: 138.19,
+          r: 30.1,
+          sx: 0.945,
+        },
+        {
+          x: 250.33,
+          y: 135.27,
+          r: 30.1,
+          sx: 0.945,
+        },
+      ],
+      [
+        {
+          x: 192.53,
+          y: 112.06,
+          r: 30.1,
+          sx: 0.929,
+        },
+        {
+          x: 243.81,
+          y: 109.14,
+          r: 30.1,
+          sx: 0.929,
+        },
+      ],
+      [
+        {
+          x: 182.07,
+          y: 85.21,
+          r: 30.1,
+          sx: 0.868,
+        },
+        {
+          x: 233.36,
+          y: 82.29,
+          r: 30.1,
+          sx: 0.868,
+        },
+      ],
+    ],
+    shut: { src: require('./h_y20_shut.webp'), x: 136, y: 84, w: 145, h: 130 },
+  },
+  {
+    yaw: 38,
+    body: { src: require('./h_y38_body.webp'), x: 145, y: 189, w: 120, h: 137 },
+    armA: { src: require('./h_y38_armA.webp'), x: 231, y: 212, w: 65, h: 119 },
+    armB: { src: require('./h_y38_armB.webp'), x: 128, y: 222, w: 47, h: 126 },
+    legs: { src: require('./h_y38_legs.webp'), x: 153, y: 296, w: 100, h: 168 },
+    pivots: {
+      armA: [
+        244.37,
+        225.99,
+      ],
+      armB: [
+        161.63,
+        236.1,
+      ],
+      legA: [
+        221.75,
+        302.04,
+      ],
+      legB: [
+        184.25,
+        306.62,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        166.8,
+        196.83,
+      ],
+      fig: [
+        148.32,
+        195.5,
+      ],
+    },
+    head: [
+      { src: require('./h_y38_head0.webp'), x: 135, y: 85, w: 154, h: 129 },
+    ],
+    eyes: [
+      [
+        {
+          x: 227.02,
+          y: 163.52,
+          r: 30.1,
+          sx: 0.821,
+        },
+        {
+          x: 270.02,
+          y: 158.27,
+          r: 30.1,
+          sx: 0.821,
+        },
+      ],
+    ],
+  },
+  {
+    yaw: 55,
+    body: { src: require('./h_y55_body.webp'), x: 144, y: 190, w: 126, h: 136 },
+    armA: { src: require('./h_y55_armA.webp'), x: 219, y: 211, w: 64, h: 116 },
+    armB: { src: require('./h_y55_armB.webp'), x: 146, y: 224, w: 41, h: 127 },
+    legs: { src: require('./h_y55_legs.webp'), x: 161, y: 295, w: 84, h: 170 },
+    pivots: {
+      armA: [
+        233.11,
+        224.32,
+      ],
+      armB: [
+        172.89,
+        237.77,
+      ],
+      legA: [
+        216.65,
+        301.28,
+      ],
+      legB: [
+        189.35,
+        307.38,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        154.83,
+        198.8,
+      ],
+      fig: [
+        195.41,
+        196.95,
+      ],
+    },
+    head: [
+      { src: require('./h_y55_head0.webp'), x: 134, y: 85, w: 159, h: 131 },
+    ],
+    eyes: [
+      [
+        {
+          x: 246.74,
+          y: 161.73,
+          r: 30.1,
+          sx: 0.709,
+        },
+        {
+          x: 278.05,
+          y: 154.74,
+          r: 30.1,
+          sx: 0.709,
+        },
+      ],
+    ],
+    shut: { src: require('./h_y55_shut.webp'), x: 134, y: 85, w: 159, h: 131 },
+  },
+  {
+    yaw: 72,
+    body: { src: require('./h_y72_body.webp'), x: 142, y: 192, w: 128, h: 134 },
+    armA: { src: require('./h_y72_armA.webp'), x: 205, y: 209, w: 58, h: 116 },
+    armB: { src: require('./h_y72_armB.webp'), x: 170, y: 225, w: 36, h: 127 },
+    legs: { src: require('./h_y72_legs.webp'), x: 166, y: 295, w: 74, h: 171 },
+    pivots: {
+      armA: [
+        219.22,
+        223.23,
+      ],
+      armB: [
+        186.78,
+        238.85,
+      ],
+      legA: [
+        210.35,
+        300.79,
+      ],
+      legB: [
+        195.65,
+        307.87,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        147.08,
+        201.24,
+      ],
+      fig: [
+        243.15,
+        196.19,
+      ],
+    },
+    head: [
+      { src: require('./h_y72_head0.webp'), x: 133, y: 84, w: 166, h: 133 },
+    ],
+    eyes: [
+      [
+        {
+          x: 279.81,
+          y: 151.12,
+          r: 30.1,
+          sx: 0.61,
+        },
+      ],
+    ],
+  },
+  {
+    yaw: 90,
+    body: { src: require('./h_y90_body.webp'), x: 145, y: 194, w: 120, h: 132 },
+    armA: { src: require('./h_y90_armA.webp'), x: 189, y: 209, w: 48, h: 114 },
+    armB: { src: require('./h_y90_armB.webp'), x: 189, y: 226, w: 48, h: 126 },
+    legs: { src: require('./h_y90_legs.webp'), x: 172, y: 295, w: 62, h: 171 },
+    pivots: {
+      armA: [
+        203.0,
+        222.83,
+      ],
+      armB: [
+        203.0,
+        239.26,
+      ],
+      legA: [
+        203.0,
+        300.61,
+      ],
+      legB: [
+        203.0,
+        308.05,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        144.2,
+        204.08,
+      ],
+      fig: [
+        289.8,
+        193.05,
+      ],
+    },
+    legA: { src: require('./h_y90_lega.webp'), x: 172, y: 295, w: 62, h: 162 },
+    legB: { src: require('./h_y90_legb.webp'), x: 172, y: 303, w: 62, h: 163 },
+    head: [
+      { src: require('./h_y90_head0.webp'), x: 133, y: 84, w: 168, h: 133 },
+    ],
+    eyes: [
+      [],
+    ],
+    shut: { src: require('./h_y90_shut.webp'), x: 133, y: 84, w: 168, h: 133 },
+  },
+  {
+    yaw: 112,
+    body: { src: require('./h_y112_body.webp'), x: 142, y: 197, w: 119, h: 129 },
+    armA: { src: require('./h_y112_armA.webp'), x: 162, y: 210, w: 39, h: 113 },
+    armB: { src: require('./h_y112_armB.webp'), x: 209, y: 225, w: 61, h: 125 },
+    legs: { src: require('./h_y112_legs.webp'), x: 165, y: 295, w: 76, h: 171 },
+    pivots: {
+      armA: [
+        183.33,
+        223.43,
+      ],
+      armB: [
+        222.67,
+        238.66,
+      ],
+      legA: [
+        194.08,
+        300.88,
+      ],
+      legB: [
+        211.92,
+        307.78,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        148.48,
+        207.53,
+      ],
+      fig: [
+        334.88,
+        186.4,
+      ],
+    },
+    head: [
+      { src: require('./h_y112_head0.webp'), x: 134, y: 84, w: 164, h: 133 },
+    ],
+    eyes: [
+      [],
+    ],
+  },
+  {
+    yaw: 135,
+    body: { src: require('./h_y135_body.webp'), x: 145, y: 200, w: 116, h: 126 },
+    armA: { src: require('./h_y135_armA.webp'), x: 132, y: 211, w: 48, h: 115 },
+    armB: { src: require('./h_y135_armB.webp'), x: 226, y: 223, w: 68, h: 123 },
+    legs: { src: require('./h_y135_legs.webp'), x: 156, y: 296, w: 94, h: 169 },
+    pivots: {
+      armA: [
+        165.88,
+        225.24,
+      ],
+      armB: [
+        240.12,
+        236.85,
+      ],
+      legA: [
+        186.17,
+        301.7,
+      ],
+      legB: [
+        219.83,
+        306.96,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        161.42,
+        210.58,
+      ],
+      fig: [
+        361.39,
+        177.16,
+      ],
+    },
+    head: [
+      { src: require('./h_y135_head0.webp'), x: 135, y: 84, w: 156, h: 133 },
+    ],
+    eyes: [
+      [],
+    ],
+  },
+  {
+    yaw: 158,
+    body: { src: require('./h_y158_body.webp'), x: 145, y: 200, w: 116, h: 126 },
+    armA: { src: require('./h_y158_armA.webp'), x: 111, y: 214, w: 57, h: 116 },
+    armB: { src: require('./h_y158_armB.webp'), x: 238, y: 220, w: 67, h: 121 },
+    legs: { src: require('./h_y158_legs.webp'), x: 150, y: 297, w: 106, h: 166 },
+    pivots: {
+      armA: [
+        154.32,
+        227.97,
+      ],
+      armB: [
+        251.68,
+        234.12,
+      ],
+      legA: [
+        180.93,
+        302.94,
+      ],
+      legB: [
+        225.07,
+        305.73,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        180.97,
+        212.61,
+      ],
+      fig: [
+        362.73,
+        167.04,
+      ],
+    },
+    head: [
+      { src: require('./h_y158_head0.webp'), x: 136, y: 83, w: 146, h: 134 },
+    ],
+    eyes: [
+      [],
+    ],
+  },
+  {
+    yaw: 180,
+    body: { src: require('./h_y180_body.webp'), x: 145, y: 200, w: 116, h: 126 },
+    armA: { src: require('./h_y180_armA.webp'), x: 105, y: 217, w: 59, h: 118 },
+    armB: { src: require('./h_y180_armB.webp'), x: 242, y: 217, w: 59, h: 119 },
+    legs: { src: require('./h_y180_legs.webp'), x: 152, y: 298, w: 102, h: 163 },
+    pivots: {
+      armA: [
+        150.5,
+        231.04,
+      ],
+      armB: [
+        255.5,
+        231.04,
+      ],
+      legA: [
+        179.2,
+        304.33,
+      ],
+      legB: [
+        226.8,
+        304.33,
+      ],
+      neck: [
+        203.0,
+        204.77,
+      ],
+      hinge: [
+        203.0,
+        213.28,
+      ],
+      fig: [
+        340.2,
+        158.01,
+      ],
+    },
+    head: [
+      { src: require('./h_y180_head0.webp'), x: 135, y: 83, w: 136, h: 134 },
+    ],
+    eyes: [
+      [],
+    ],
+  },
+];
