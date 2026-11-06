@@ -103,6 +103,10 @@ planted, no reminder is set, and its draft arrives with all three warnings.
 fixed labels chosen by tool name. No text from a mail or from the model's arguments reaches them, so a
 hostile text cannot write its own status on the screen.
 
+## Tasks from mail and announcements
+
+The model sees the text fenced as untrusted, with no tools, only when you tap **Hatırlatıcı ekle**. Its answer is cleaned, links are dropped, and it is only a proposal: nothing reaches Google Tasks until you pick it. A mail goes to Gemini for this only if mail is allowed there.
+
 ## App updates
 
 The app updates only from your own server or from this project's GitHub Releases, and only when you tap. It compares

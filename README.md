@@ -145,6 +145,8 @@ for every course, so he tells you what is written and which courses say nothing.
 
 ## Notifications and chat
 
+With Google Tasks connected, a mail or an announcement has **Hatırlatıcı ekle**: only when you tap it, the model proposes a short task, or a few when it is not clear, and you can write your own instead. Nothing is added until you choose. Exams go in from **Bugün** directly.
+
 **Bildirimler** keeps Canvas and mail in two lists, each counting what you have not read, grouped by day with the newest
 first. The chips above the list narrow it by kind or by course and say how many each holds. Opening a notification marks it
 read; the two buttons at the top mark a whole list read or delete what you have read in it. Pull down to check Canvas and mail

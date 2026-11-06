@@ -25,6 +25,7 @@ from .agent import answer
 from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import GeminiClient, LlmBusy, LlmClient, gemini_models
+from .suggest import clean_title, suggest_tasks
 from .notify import send_approved_draft
 from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS
 from .store import draft_hash, event_source, Store, to_time
@@ -50,8 +51,14 @@ class ChatRequest(BaseModel):
     turnId: str | None = Field(default=None, pattern=r"^[A-Za-z0-9-]{8,64}$")
 
 
-class TaskRequest(BaseModel):
+class TaskKey(BaseModel):
     key: str
+
+
+class TaskRequest(TaskKey):
+    # The student's own choice of wording and day, for a mail or an announcement. Without them: the item's own.
+    title: str | None = Field(default=None, max_length=300)
+    due: date | None = None
 
 
 class SendRequest(BaseModel):
@@ -215,7 +222,8 @@ def create_app(
         ]
         today_here = now.astimezone(settings.timezone).date()
         coming = [
-            exam_json(row) for row in store.exams()
+            {**exam_json(row), "inTasks": store.get_meta(f"gtask:{exam_json(row)['key']}") is not None}
+            for row in store.exams()
             if date.fromisoformat(row["ends_on"] or row["starts_on"]) >= today_here
         ]
         missing = [
@@ -243,22 +251,63 @@ def create_app(
         """Puts a Canvas item into the student's Google Tasks, once."""
         if tasks is None:
             raise HTTPException(409, "Google Tasks bağlı değil")
-        row = store.get_item(request.key)
-        if row is None:
-            raise HTTPException(404, "kayıt bulunamadı")
         marker = f"gtask:{request.key}"
+        exam = next((r for r in store.exams() if exam_json(r)["key"] == request.key), None)
+        row = None if exam else store.get_item(request.key)
+        if exam is None and row is None:
+            raise HTTPException(404, "kayıt bulunamadı")
         if store.get_meta(marker):
             return {"status": "exists"}
-        due = to_time(row["due_at"])
-        title = f"{row['course']}: {row['title']}" if row["course"] else row["title"]
+        if exam:
+            # An exam has no text to summarise: its course and date say it all, so no model is involved.
+            name = "Vize" if exam["kind"] == "midterm" else "Final"
+            name += f" {exam['number']}" if exam["number"] else ""
+            guessed = exam["status"] == "estimated"
+            title = f"{exam['course']}: {name}{' (tahmini)' if guessed else ''}"
+            week = f"Tahmini tarih: {exam['week']}. hafta. Kesinleşince kontrol et." if guessed else ""
+            notes = "\n".join(part for part in (week, exam["url"]) if part)
+            day = date.fromisoformat(exam["starts_on"])
+        else:
+            due = to_time(row["due_at"])
+            day = due.astimezone(settings.timezone).date() if due else None
+            origin = f"{row['course']}: {row['title']}" if row["course"] else row["title"]
+            title, notes = origin, row["url"]
+        if request.title is not None and row is not None:
+            title = clean_title(request.title)
+            if not title:
+                raise HTTPException(422, "Görev metni boş olamaz, bağlantı da içeremez")
+            notes = "\n".join(part for part in (origin, row["url"]) if part)
+            day = request.due or day
         try:
-            task_id = tasks.add(title, row["url"], due.astimezone(settings.timezone).date() if due else None)
+            task_id = tasks.add(title, notes, day)
         except GoogleTasksError as error:
             raise HTTPException(502, str(error)) from error
         except httpx.HTTPError as error:
             raise HTTPException(502, "Google Tasks'a ulaşılamadı") from error
         store.set_meta(marker, task_id)
         return {"status": "added"}
+
+    @app.post("/v1/tasks/suggest", dependencies=guarded)
+    def suggest_task(request: TaskKey, store: Db) -> dict[str, Any]:
+        """Only when the student taps for it, and it adds nothing: see suggest.py. The same model rules as chat."""
+        if tasks is None:
+            raise HTTPException(409, "Google Tasks bağlı değil")
+        row = store.get_item(request.key)
+        if row is None:
+            raise HTTPException(404, "kayıt bulunamadı")
+        model = llm
+        if model is None:
+            model = current_gemini()
+            if model is None:
+                raise HTTPException(409, "Model bağlı değil, görevi kendin yazabilirsin")
+            if row["kind"] == "mail" and not mail_to_gemini():
+                raise HTTPException(409, "Mailler Gemini'ye kapalı, görevi kendin yazabilirsin")
+        today = datetime.now(UTC).astimezone(settings.timezone).date()
+        try:
+            options = suggest_tasks(model, row["title"], row["course"], row["sender"], row["body"], today)
+        except LlmBusy as busy:
+            raise HTTPException(503, str(busy)) from busy
+        return {"options": options}
 
     @app.post("/v1/tasks/remove", dependencies=guarded)
     def remove_task(request: TaskRequest, store: Db) -> dict[str, str]:
@@ -326,6 +375,7 @@ def create_app(
             "sender": row["sender"], "body": row["body"], "url": row["url"],
             "postedAt": row["posted_at"], "dueAt": row["due_at"], "grade": row["grade"],
             "submitted": bool(row["submitted"]),
+            "inTasks": store.get_meta(f"gtask:{row['key']}") is not None,
             # Images come only as the sandbox re-encoded them; other files are listed, never served.
             "attachments": [
                 {"name": a.name, "type": a.type, "size": a.size, "image": a.image, "width": a.width, "height": a.height}

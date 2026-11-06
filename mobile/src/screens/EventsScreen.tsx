@@ -260,8 +260,15 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
   const [filter, setFilter] = useState<Filter>('all');
   const [course, setCourse] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
+  const [tasksEnabled, setTasksEnabled] = useState(false);
   // Counts down from the moment the list was read, and moves on with every refresh.
   const now = useMemo(() => Date.now(), [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let live = true;
+    api.chatSetup(connection).then((setup) => { if (live) setTasksEnabled(!!setup.features?.tasks); }, () => undefined);
+    return () => { live = false; };
+  }, [connection]);
 
   const pull = useCallback(() => {
     void refresh(async () => {
@@ -473,6 +480,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
         <DetailSheet
           connection={connection}
           target={{ key: open.itemKey, title: shown?.title ?? open.title, body: shown?.body ?? open.body, url: open.url, when: open.createdAt }}
+          tasksEnabled={tasksEnabled}
           onClose={() => setOpen(null)}
           onSolve={onSolve}
         />

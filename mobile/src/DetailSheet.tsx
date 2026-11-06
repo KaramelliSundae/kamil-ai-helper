@@ -37,6 +37,7 @@ import { icons } from './icons';
 import { LinkDialog, MailBody } from './MailBody';
 import { loadMailImage } from './mailImages';
 import { hostOf, linkRisk, LinkRisk, splitSender } from './mailText';
+import { TaskPicker } from './TaskPicker';
 import { Notice, rounded, shapes } from './ui';
 
 /** What the list already knows, shown until the full record arrives (and kept when there is none). */
@@ -70,6 +71,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [taskAdded, setTaskAdded] = useState(!!inTasks);
+  const [picking, setPicking] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk } | null>(null);
@@ -86,7 +88,11 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
     api
       .item(connection, target.key)
       .then(
-        (found) => live && setDetail(found),
+        (found) => {
+          if (!live) return;
+          setDetail(found);
+          if (found.inTasks !== undefined) setTaskAdded(found.inTasks);
+        },
         () => live && setDetail(null), // reminders and alerts have no record behind them
       )
       .finally(() => live && setLoading(false));
@@ -104,6 +110,8 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   const when = detail?.postedAt ?? target.when ?? null;
   const unreadable = detail?.title === UNREADABLE;
   const files = detail?.attachments ?? [];
+  // Only an announcement or a mail needs the model to say what the task is, and only when asked: an assignment names itself.
+  const remindable = !!tasksEnabled && !!detail && !work && !unreadable;
 
   const addTask = async () => {
     setError(null);
@@ -172,6 +180,18 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
 
         {error ? <Notice tone="error">{error}</Notice> : null}
         {note ? <Notice>{note}</Notice> : null}
+        {picking ? (
+          <TaskPicker
+            connection={connection}
+            itemKey={target.key}
+            onCancel={() => setPicking(false)}
+            onAdded={(status) => {
+              setPicking(false);
+              setTaskAdded(true);
+              setNote(status === 'exists' ? "Zaten Google Tasks'ta." : "Google Tasks'a eklendi.");
+            }}
+          />
+        ) : null}
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
           {work && detail && onSolve ? (
             <Button onClick={() => onSolve(detail)}>
@@ -179,7 +199,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
               <Text modifiers={[paddingAll(4)]}>Gemini ile çöz</Text>
             </Button>
           ) : null}
-          {work && tasksEnabled && taskAdded ? (
+          {(work && tasksEnabled || remindable) && taskAdded ? (
             <OutlinedButton onClick={() => setConfirmRemove(true)}>
               <Icon source={icons.taskDone} size={18} />
               <Text modifiers={[paddingAll(4)]}>Google Tasks'tan çıkar</Text>
@@ -189,6 +209,12 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
             <FilledTonalButton onClick={() => void addTask()}>
               <Icon source={icons.addTask} size={18} />
               <Text modifiers={[paddingAll(4)]}>Google Tasks'a ekle</Text>
+            </FilledTonalButton>
+          ) : null}
+          {remindable && !taskAdded && !picking ? (
+            <FilledTonalButton onClick={() => { setNote(null); setPicking(true); }}>
+              <Icon source={icons.addTask} size={18} />
+              <Text modifiers={[paddingAll(4)]}>Hatırlatıcı ekle</Text>
             </FilledTonalButton>
           ) : null}
           {url ? (
@@ -208,7 +234,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
       {confirmRemove ? (
         <ConfirmDialog
           title="Google Tasks'tan çıkarılsın mı?"
-          text={`"${target.title}" görev listenden silinecek. Canvas'taki ödevine bir şey olmaz.`}
+          text={`"${target.title}" görev listenden silinecek. Canvas'a ve mail kutuna bir şey olmaz.`}
           confirm="Çıkar"
           onConfirm={() => void removeTask()}
           onCancel={() => setConfirmRemove(false)}

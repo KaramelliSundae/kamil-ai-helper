@@ -135,10 +135,14 @@ export const api = {
     c.mode === 'phone' ? phoneApi.deleteAllConversations() : request<{ status: string }>(c, '/v1/conversations', 'DELETE'),
   item: (c: Connection, key: string) =>
     c.mode === 'phone' ? phoneApi.item(key) : request<ItemDetail>(c, `/v1/items/${encodeURIComponent(key)}`, 'GET'),
-  addTask: (c: Connection, key: string) =>
+  addTask: (c: Connection, key: string, choice?: { title: string; due?: string | null }) =>
     c.mode === 'phone'
       ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
-      : request<{ status: string }>(c, '/v1/tasks', 'POST', { key }),
+      : request<{ status: string }>(c, '/v1/tasks', 'POST', { key, ...choice }),
+  suggestTask: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      : request<{ options: TaskOption[] }>(c, '/v1/tasks/suggest', 'POST', { key }),
   removeTask: (c: Connection, key: string) =>
     c.mode === 'phone'
       ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))

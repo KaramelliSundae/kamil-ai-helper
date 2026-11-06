@@ -37,11 +37,12 @@ class LlmClient:
             target = (answer.json().get("url") or target).rstrip("/")
         body = {
             "messages": messages,
-            "tools": tools,
             "temperature": 0.2,
             "max_tokens": 800,
             "chat_template_kwargs": {"enable_thinking": False},
         }
+        if tools:
+            body["tools"] = tools
         try:
             response = httpx.post(f"{target}/v1/chat/completions", json=body, timeout=ANSWER_SECONDS)
             response.raise_for_status()
@@ -66,7 +67,9 @@ class GeminiClient:
         self.client = client or httpx.Client(timeout=GEMINI_SECONDS)
 
     def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> dict[str, Any]:
-        body = {"model": self.model, "messages": messages, "tools": tools, "temperature": 0.4}
+        body = {"model": self.model, "messages": messages, "temperature": 0.4}
+        if tools:
+            body["tools"] = tools
         try:
             response = self.client.post(GEMINI_URL, json=body, headers={"Authorization": f"Bearer {self.api_key}"})
         except httpx.HTTPError as error:

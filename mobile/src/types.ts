@@ -55,7 +55,10 @@ export type Exam = {
   source: string;
   evidence: string;
   url: string;
+  inTasks?: boolean;
 };
+/** A task the model proposes from an announcement or a mail. Nothing is added until the student picks it. */
+export type TaskOption = { title: string; due: string | null };
 export type Today = {
   upcoming: Upcoming[];
   pendingDrafts: number;
@@ -77,6 +80,7 @@ export type ItemDetail = {
   dueAt: string | null;
   grade: string | null;
   submitted: boolean;
+  inTasks?: boolean;
   /** Older servers send none. `image` is the hash of a JPEG the server's sandbox re-encoded. */
   attachments?: Attachment[];
 };

@@ -58,7 +58,13 @@ function examWhen(exam: Exam): string {
   return `${exam.week}. hafta · ${shortDay(exam.startsOn, true)} – ${shortDay(exam.endsOn, true)}`;
 }
 
-function ExamRow({ exam, now, onOpen }: { exam: Exam; now: number; onOpen: () => void }) {
+function ExamRow({ exam, now, onOpen, onAddTask, onRemoveTask }: {
+  exam: Exam;
+  now: number;
+  onOpen: () => void;
+  onAddTask?: () => void;
+  onRemoveTask?: () => void;
+}) {
   const colors = useMaterialColors();
   const left = daysUntil(exam.startsOn, now);
   const near = exam.status !== 'estimated' && left <= 7;
@@ -90,6 +96,15 @@ function ExamRow({ exam, now, onOpen }: { exam: Exam; now: number; onOpen: () =>
             ) : null}
           </Row>
         </Column>
+        {exam.inTasks ? (
+          <IconButton enabled={!!onRemoveTask} onClick={() => onRemoveTask?.()}>
+            <Icon source={icons.taskDone} size={22} tint={colors.primary} contentDescription="Google Tasks'ta, çıkarmak için dokun" />
+          </IconButton>
+        ) : onAddTask ? (
+          <FilledTonalIconButton onClick={onAddTask}>
+            <Icon source={icons.addTask} size={22} contentDescription="Google Tasks'a ekle" />
+          </FilledTonalIconButton>
+        ) : null}
       </Row>
     </Panel>
   );
@@ -190,12 +205,12 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
   const [taskError, setTaskError] = useState<string | null>(null);
   const [tab, setTab] = useState<'work' | 'exams'>('work');
   const [openExam, setOpenExam] = useState<Exam | null>(null);
-  const [removing, setRemoving] = useState<Upcoming | null>(null);
+  const [removing, setRemoving] = useState<{ key: string; title: string } | null>(null);
   const now = Date.now();
   const tasksEnabled = !!data?.tasksEnabled;
 
   const addTask = useCallback(
-    async (item: Upcoming) => {
+    async (item: { key: string }) => {
       setTaskError(null);
       try {
         await api.addTask(connection, item.key);
@@ -207,7 +222,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
     [connection, refresh],
   );
 
-  const removeTask = async (item: Upcoming) => {
+  const removeTask = async (item: { key: string }) => {
     setRemoving(null);
     setTaskError(null);
     try {
@@ -226,9 +241,11 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         exam={item}
         now={Date.now()}
         onOpen={() => setOpenExam(item)}
+        onAddTask={tasksEnabled ? () => void addTask(item) : undefined}
+        onRemoveTask={tasksEnabled ? () => setRemoving({ key: item.key, title: `${item.course}: ${examName(item)}` }) : undefined}
       />
     ),
-    [],
+    [addTask, tasksEnabled],
   );
 
   const renderRow = useCallback(
@@ -310,7 +327,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
       {removing ? (
         <ConfirmDialog
           title="Google Tasks'tan çıkarılsın mı?"
-          text={`"${removing.title}" görev listenden silinecek. Canvas'taki ödevine bir şey olmaz.`}
+          text={`"${removing.title}" görev listenden silinecek. Canvas'a bir şey olmaz.`}
           confirm="Çıkar"
           onConfirm={() => void removeTask(removing)}
           onCancel={() => setRemoving(null)}

@@ -49,6 +49,8 @@ export type Rig = {
   idle: Animated.Value;
   typing: Animated.Value;
   armUp: Animated.Value;
+  /** -1 to 1: the head leaning to one side or the other, while he thinks or reads. */
+  headTilt: Animated.Value;
   scribble: Animated.Value;
   figOn: Animated.Value;
   /** The side he has settled on. Only that one moves, so the hidden drawings cost nothing frame by frame. */
@@ -83,7 +85,7 @@ function makeRig(view = 0): Rig {
   const value = (start = 0) => new Animated.Value(start);
   return {
     view: value(view), flip: value(1), walk: value(), sit: value(), jaw: value(), blink: value(), gazeX: value(), gazeY: value(),
-    idle: value(), typing: value(), armUp: value(), scribble: value(), figOn: value(),
+    idle: value(), typing: value(), armUp: value(), headTilt: value(), scribble: value(), figOn: value(),
     liveView: view, liveListeners: new Set(),
   };
 }
@@ -131,7 +133,7 @@ export async function turnRobot(rig: Rig, facing: { current: number }, flipped: 
 }
 
 /** Blinks now and then, and the small quick glances that make them look alive. */
-export function useLife(rig: Rig, awake: boolean) {
+export function useLife(rig: Rig, awake: boolean, glances = true) {
   useEffect(() => {
     if (!awake) return;
     const blink = Animated.loop(Animated.sequence([
@@ -141,7 +143,7 @@ export function useLife(rig: Rig, awake: boolean) {
       Animated.timing(rig.blink, { toValue: 0, duration: 35, useNativeDriver: true }),
     ]));
     blink.start();
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const glance = () => {
       Animated.parallel([
         Animated.timing(rig.gazeX, { toValue: Math.random() * 2 - 1, duration: 80, useNativeDriver: true }),
@@ -149,13 +151,13 @@ export function useLife(rig: Rig, awake: boolean) {
       ]).start();
       timer = setTimeout(glance, 1400 + Math.random() * 2600);
     };
-    timer = setTimeout(glance, 800);
+    if (glances) timer = setTimeout(glance, 800);
     return () => {
       blink.stop();
       clearTimeout(timer);
       rig.blink.setValue(0);
     };
-  }, [awake, rig]);
+  }, [awake, glances, rig]);
 }
 
 function Piece({ sprite, k }: { sprite: Sprite; k: number }) {
@@ -298,6 +300,7 @@ const OneView = memo(function OneView({ view, index, rig, k, mood, lying, live }
   const nearArmBeforeHead = !nearArmOverHead && index !== Y180;
   // The head lags behind the body at each step, which makes the stiff walk funny.
   const headLag = live ? waveDeg(rig.walk, -3.5) : '0deg';
+  const lean = live ? rig.headTilt.interpolate({ inputRange: [-1, 1], outputRange: ['-8deg', '8deg'] }) : '0deg';
   const breath = live ? waveDeg(rig.idle, 1.1) : '0deg';
   const typeNod = live ? waveDeg(rig.typing, 0.5) : '0deg';
   return (
@@ -319,7 +322,7 @@ const OneView = memo(function OneView({ view, index, rig, k, mood, lying, live }
         {typingArms}
         <Piece sprite={view.body} k={k} />
         {nearArmBeforeHead ? armB : null}
-        <Pivot k={k} at={view.pivots.hinge} transform={[{ rotate: headLag }, { rotate: breath }, { rotate: typeNod }]}>
+        <Pivot k={k} at={view.pivots.hinge} transform={[{ rotate: headLag }, { rotate: breath }, { rotate: typeNod }, { rotate: lean }]}>
           <Head view={view} rig={rig} k={k} mood={mood} live={live} />
         </Pivot>
         {nearArmOverHead ? armB : null}
@@ -1224,7 +1227,6 @@ function Sleeping({ left, top, cycle }: { left: number; top: number; cycle: Anim
 
 const CHAT_LINE = 'Buyurun patron, sizi dinliyorum.';
 const ANSWER_LINE = 'Buyurun patron.';
-const PACE_UNITS_PER_SECOND = 1.3;
 const ANSWER_FRESH_MS = 2500;
 const ANSWER_LINE_MS = 4000;
 
@@ -1234,7 +1236,7 @@ let chatGreeted = false;
 let answerLandedAt = 0;
 
 /** A strip of the page with Kamil standing in it and his speech bubble beside him. */
-function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }: {
+function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1, glances = true, props }: {
   width: number;
   height: number;
   rig: Rig;
@@ -1242,11 +1244,15 @@ function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }:
   line: string;
   bubbleLeft: number;
   opacity?: Animated.Value | number;
+  /** Off while he is looking at something on purpose. */
+  glances?: boolean;
+  /** What he holds or what appears over him. The ground point he stands on is at (0, 0) of it. */
+  props?: (unit: number) => React.ReactNode;
 }) {
   const k = height / (2.95 * CANVAS.unit);
   const unit = CANVAS.unit * k;
   useFlap(line, rig.jaw);
-  useLife(rig, true);
+  useLife(rig, true, glances);
   useLoop(rig.idle, 2600);
   return (
     <View pointerEvents="none" style={{ width, height }}>
@@ -1254,6 +1260,7 @@ function KamilStrip({ width, height, rig, posX, line, bubbleLeft, opacity = 1 }:
         style={{ position: 'absolute', left: 0, top: height - 0.08 * unit, width, height, opacity, transform: [{ translateX: posX }] }}>
         <Image source={STAGE.shadow} fadeDuration={0} style={{ position: 'absolute', left: -0.66 * unit, top: -0.17 * unit, width: 1.32 * unit, height: 0.42 * unit, opacity: 0.6 }} />
         <RobotBody views={KAMIL} rig={rig} k={k} mood="happy" />
+        {props?.(unit)}
       </Animated.View>
       {line ? (
         <View style={{ position: 'absolute', left: bubbleLeft, right: 2, top: height * 0.1 }}>
@@ -1308,70 +1315,130 @@ export function ChatGreeter() {
   );
 }
 
+type Activity = 'think' | 'check' | 'write';
+
+/** The step labels are fixed strings, so what he acts out is what the model is really doing at that moment. */
+export function activityOf(label: string): Activity {
+  if (/hazırlıyor|kaydetmeyi|kurmayı/i.test(label)) return 'write';
+  if (/bakıyor|okuyor|arıyor|Okunan metin/i.test(label)) return 'check';
+  return 'think';
+}
+
+/** A sign that comes up beside his head and fades: a question while thinking, a tick while checking. */
+function PopSign({ text, unit, color, cycle }: { text: string; unit: number; color: string; cycle: Animated.Value }) {
+  return (
+    <Animated.Text
+      style={{
+        position: 'absolute', left: 0.42 * unit, top: -2.42 * unit, fontSize: 0.5 * unit, fontWeight: '800', color,
+        opacity: cycle.interpolate({ inputRange: [0, 0.5, 0.62, 0.86, 1], outputRange: [0, 0, 1, 1, 0] }),
+        transform: [{ translateY: cycle.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.14 * unit, 0.14 * unit, -0.14 * unit] }) }],
+      }}>
+      {text}
+    </Animated.Text>
+  );
+}
+
+/** The board he reads from or writes on. A line of it lights up as his eyes get there. */
+function Clipboard({ unit, cycle, writing }: { unit: number; cycle: Animated.Value; writing: boolean }) {
+  const lines = [0.86, 0.62, 0.78];
+  return (
+    <View
+      style={{
+        position: 'absolute', left: -0.36 * unit, top: -1.42 * unit, width: 0.56 * unit, height: 0.72 * unit,
+        borderRadius: 0.035 * unit, backgroundColor: '#6d4a2c', padding: 0.05 * unit, transform: [{ rotate: '-7deg' }],
+      }}>
+      <View style={{ flex: 1, backgroundColor: '#e9dfc8', borderRadius: 0.012 * unit, paddingHorizontal: 0.05 * unit, paddingTop: 0.11 * unit, gap: 0.075 * unit }}>
+        {lines.map((length, index) => {
+          const from = index / lines.length;
+          const to = (index + 1) / lines.length;
+          return (
+            <View key={length} style={{ height: 0.032 * unit, width: `${length * 100}%`, backgroundColor: '#8b8069', overflow: 'hidden' }}>
+              <Animated.View
+                style={{
+                  flex: 1, backgroundColor: writing ? '#1d2a4a' : '#8c1f15', transformOrigin: 'left',
+                  transform: [{ scaleX: cycle.interpolate({ inputRange: [0, from, to, 1], outputRange: [0, 0, 1, writing ? 1 : 0], extrapolate: 'clamp' }) }],
+                }}
+              />
+            </View>
+          );
+        })}
+      </View>
+      <View style={{ position: 'absolute', alignSelf: 'center', top: -0.025 * unit, width: 0.2 * unit, height: 0.07 * unit, borderRadius: 0.015 * unit, backgroundColor: '#9aa0a6' }} />
+    </View>
+  );
+}
+
+const THINK_ARM = 0.72;
+const CHECK_ARM = 0.26;
+const WRITE_ARM = 0.42;
+const SIGN_MS = 3400;
+
 /**
- * While an answer is on its way he paces up and down, thinking. Each time the model really starts something new, he
- * stops, turns to you and says it, then goes back to pacing. The line is one of the fixed step labels.
+ * While an answer is on its way he stays on his spot and acts out the real step: thinking with a hand up and his eyes
+ * on the ceiling, or going down a clipboard line by line. The line in the bubble is one of the fixed step labels.
  */
 export function WaitingFigure({ label }: { label: string }) {
   const window = useWindowDimensions();
   const width = window.width - 32; // the screen's own padding around this row
-  const height = 96;
-  const k = height / 2.95;
-  const left = k * 0.8;
-  const bubbleLeft = Math.round(width * 0.54);
-  const right = bubbleLeft - k * 0.8;
+  const height = 112;
+  const stand = height * 0.36;
+  const bubbleLeft = Math.round(stand * 2 + 8);
   const rig = useRig(Y20);
-  const posX = useRef(new Animated.Value(left)).current;
-  const x = useRef(left);
+  const activity = activityOf(label);
   const facing = useRef(Y20);
   const flipped = useRef(false);
+  const cycle = useRef(new Animated.Value(0)).current;
+  useLoop(cycle, activity === 'think' ? SIGN_MS : SIGN_MS * 0.8);
+  useLoop(rig.scribble, 620, activity === 'write');
 
   useEffect(() => () => { answerLandedAt = Date.now(); }, []);
   useEffect(() => {
     let live = true;
-    let move: Animated.CompositeAnimation | null = null;
-    const isLive = () => live;
-    const turn = (target: number, flip: boolean) => turnRobot(rig, facing, flipped, target, flip, isLive);
-    const walkTo = (to: number) => new Promise<void>((resolve) => {
-      const steps = Animated.loop(Animated.timing(rig.walk, { toValue: 1, duration: WALK_MS, easing: Easing.linear, useNativeDriver: true }));
-      steps.start();
-      move = Animated.timing(posX, {
-        toValue: to,
-        duration: Math.abs(to - x.current) / (PACE_UNITS_PER_SECOND * k) * 1000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      });
-      move.start(({ finished }) => {
-        steps.stop();
-        rig.walk.setValue(0);
-        if (finished) x.current = to;
-        resolve();
-      });
+    const to = (value: Animated.Value, toValue: number, duration: number) => Animated.timing(value, {
+      toValue, duration, easing: Easing.inOut(Easing.quad), useNativeDriver: true,
     });
-    void (async () => {
-      await turn(Y20, false);
-      await PAUSE(1100 + label.length * 40);
-      while (live) {
-        const goRight = x.current < (left + right) / 2;
-        await turn(Y90, !goRight);
-        if (!live) return;
-        await walkTo(goRight ? right : left);
-        if (!live) return;
-        await turn(Y55, !goRight);
-        await PAUSE(450);
-      }
-    })();
+    const both = (tilt: number, x: number, y: number, duration: number) => Animated.parallel([
+      to(rig.headTilt, tilt, duration), to(rig.gazeX, x, duration * 0.4), to(rig.gazeY, y, duration * 0.4),
+    ]);
+    const moves = activity === 'think'
+      ? [both(-0.9, -0.8, -1, 800), Animated.delay(1100), both(0.7, 0.9, -0.9, 900), Animated.delay(1300)]
+      : [
+        both(0.25, -1, 1, 300), both(0.05, 1, 1, 620), Animated.delay(120),
+        both(0.3, -1, 1, 300), both(0.1, 1, 1, 620), Animated.delay(120),
+        both(0.35, -1, 1, 300), both(0.15, 0.6, 1, 520), Animated.delay(320),
+      ];
+    const acting = Animated.loop(Animated.sequence(moves));
+    void turnRobot(rig, facing, flipped, activity === 'think' ? Y55 : Y20, false, () => live).then(() => {
+      if (!live) return;
+      to(rig.armUp, activity === 'think' ? THINK_ARM : activity === 'check' ? CHECK_ARM : WRITE_ARM, 420).start();
+      acting.start();
+    });
     return () => {
       live = false;
-      (move as Animated.CompositeAnimation | null)?.stop();
-      posX.stopAnimation((value) => { x.current = value; });
+      acting.stop();
     };
-  }, [k, label, left, posX, right, rig]);
+  }, [activity, rig]);
 
   return (
     <RNHostView modifiers={[size(width, height)]}>
       <View style={styles.host}>
-        <KamilStrip width={width} height={height} rig={rig} posX={posX} line={label} bubbleLeft={bubbleLeft} />
+        <KamilStrip
+          width={width}
+          height={height}
+          rig={rig}
+          posX={stand}
+          line={label}
+          bubbleLeft={bubbleLeft}
+          glances={false}
+          props={(unit) => (
+            <>
+              {activity === 'think' ? null : <Clipboard unit={unit} cycle={cycle} writing={activity === 'write'} />}
+              {activity === 'write' ? null : (
+                <PopSign text={activity === 'think' ? '?' : '✓'} unit={unit} color={activity === 'think' ? '#c9a24a' : '#3f8f55'} cycle={cycle} />
+              )}
+            </>
+          )}
+        />
       </View>
     </RNHostView>
   );
