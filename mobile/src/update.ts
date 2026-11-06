@@ -8,7 +8,7 @@ import * as Application from 'expo-application';
 import { File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 
-import { api, ApiError, Connection, Release, serverUrl } from './api';
+import { api, Connection, Release, serverUrl } from './api';
 
 // A fork changes this to its own repository. Releases hold two files: latest.json and kamil.apk.
 const RELEASES = 'https://github.com/KaramelliSundae/kamil-ai-helper/releases/latest/download';
@@ -35,22 +35,22 @@ async function latestOnGitHub(): Promise<Release | null> {
   return { ...latest, source: 'github' };
 }
 
-/** The server's own release if it publishes one, otherwise GitHub's. A missing server release is not an error. */
-async function latestRelease(connection: Connection | null): Promise<Release | null> {
+/**
+ * The published release when it is newer than this app, otherwise null. A server's own release goes first if it is newer,
+ * but an old one, or a server out of reach, must not hide what GitHub has.
+ */
+export async function findUpdate(connection: Connection | null): Promise<Release | null> {
+  const installed = installedVersion().code;
   if (connection?.mode === 'server') {
     try {
-      return { ...(await api.latestApp(connection)), source: 'server' };
-    } catch (reason) {
-      if (!(reason instanceof ApiError && reason.status === 404)) throw reason;
+      const own = await api.latestApp(connection);
+      if (own.versionCode > installed) return { ...own, source: 'server' };
+    } catch {
+      // Nothing published there, or the server is out of reach: GitHub can still answer.
     }
   }
-  return latestOnGitHub();
-}
-
-/** The published release when it is newer than this app, otherwise null. */
-export async function findUpdate(connection: Connection | null): Promise<Release | null> {
-  const latest = await latestRelease(connection);
-  return latest && latest.versionCode > installedVersion().code ? latest : null;
+  const latest = await latestOnGitHub();
+  return latest && latest.versionCode > installed ? latest : null;
 }
 
 export async function installUpdate(connection: Connection | null, release: Release): Promise<void> {

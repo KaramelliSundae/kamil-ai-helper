@@ -12,13 +12,17 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
   const [release, setRelease] = useState<Release | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [upToDate, setUpToDate] = useState(false);
   const installed = installedVersion();
 
   const check = useCallback(async () => {
     setError(null);
+    setUpToDate(false);
     setBusy(true);
     try {
-      setRelease(await findUpdate(connection));
+      const found = await findUpdate(connection);
+      setRelease(found);
+      setUpToDate(!found);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Güncelleme denetlenemedi.');
     } finally {
@@ -64,7 +68,7 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
       <Text color={release ? colors.onTertiaryContainer : colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
         {release
           ? `Kurulu: ${installed.name} (${installed.code}). Yeni: ${release.versionName} (${release.versionCode}).`
-          : `Sürüm ${installed.name} (${installed.code}).`}
+          : `Sürüm ${installed.name} (${installed.code}).${upToDate ? ' Bu en son sürüm.' : ''}`}
       </Text>
       <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
         {release ? (
@@ -73,7 +77,7 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
           </Button>
         ) : (
           <FilledTonalButton enabled={!busy} onClick={() => void check()}>
-            <Text>Güncellemeleri denetle</Text>
+            <Text>{busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}</Text>
           </FilledTonalButton>
         )}
         {busy ? <LoadingIndicator /> : null}
