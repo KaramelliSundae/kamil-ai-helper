@@ -13,7 +13,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
 import httpx
@@ -26,14 +26,15 @@ from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import GeminiClient, LlmBusy, LlmClient, gemini_models
 from .notify import send_approved_draft
-from .store import Store, draft_hash, to_time
+from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS
+from .store import draft_hash, event_source, Store, to_time
 from .tools import MAIL_TOOLS, Tools
 
 UPCOMING_DAYS = 14
 CONVERSATION_LIMIT = 100
 MESSAGE_LIMIT = 200
 PLACEHOLDER = re.compile(r"\[[^\]\n]{2,60}\]")  # for example [Adın Soyadın]
-GPU_MODES = ("auto", "image")
+GPU_MODES = ("assistant", "compute", "auto", "image")  # the last two: what apps not yet updated still send
 GEMINI_FILE = "gemini.json"  # a key entered in the app, with the model and the mail choice
 APK_TYPE = "application/vnd.android.package-archive"
 IMAGE_ID = re.compile(r"[0-9a-f]{64}")
@@ -61,6 +62,18 @@ class ModeRequest(BaseModel):
     mode: str
 
 
+class SyllabusCheckRequest(BaseModel):
+    days: int
+
+
+class ReadRequest(BaseModel):
+    read: bool = True
+
+
+class ReadAllRequest(BaseModel):
+    source: str
+
+
 class PriorityRequest(BaseModel):
     on: bool
 
@@ -82,10 +95,19 @@ def event_json(row: Any, item: Any = None) -> dict[str, Any]:
     return {
         "id": row["id"], "itemKey": row["item_key"], "type": row["type"], "level": row["level"],
         "title": row["title"], "body": row["body"], "url": row["url"], "createdAt": row["created_at"],
+        "read": row["read_at"] is not None, "source": event_source(row["item_key"]),
         "current": {
             "title": item["title"], "course": item["course"], "dueAt": item["due_at"],
-            "submitted": bool(item["submitted"]), "grade": item["grade"],
+            "submitted": bool(item["submitted"]), "grade": item["grade"], "postedAt": item["posted_at"],
         } if item is not None else None,
+    }
+
+
+def exam_json(row: Any) -> dict[str, Any]:
+    return {
+        "key": f"exam:{row['course']}:{row['kind']}:{row['number']}", "course": row["course"], "kind": row["kind"],
+        "number": row["number"], "startsOn": row["starts_on"], "endsOn": row["ends_on"], "status": row["status"],
+        "week": row["week"], "source": row["source"], "evidence": row["evidence"], "url": row["url"],
     }
 
 
@@ -191,10 +213,30 @@ def create_app(
             }
             for r in rows
         ]
+        today_here = now.astimezone(settings.timezone).date()
+        coming = [
+            exam_json(row) for row in store.exams()
+            if date.fromisoformat(row["ends_on"] or row["starts_on"]) >= today_here
+        ]
+        missing = [
+            {"course": row["course"], "hint": row["hint"]} for row in store.exam_courses()
+            if not row["has_syllabus"] and not any(exam["course"] == row["course"] for exam in coming)
+        ]
         return {
             "upcoming": upcoming, "pendingDrafts": len(store.pending_drafts()), "gpu": gpu_state(),
-            "tasksEnabled": tasks is not None,
+            "tasksEnabled": tasks is not None, "exams": coming, "examsMissing": missing,
         }
+
+    @app.get("/v1/settings/syllabus-check", dependencies=guarded)
+    def syllabus_check(store: Db) -> dict[str, int]:
+        return {"days": int(store.get_meta("syllabus_check_days") or DEFAULT_CHECK_DAYS)}
+
+    @app.post("/v1/settings/syllabus-check", dependencies=guarded)
+    def set_syllabus_check(request: SyllabusCheckRequest, store: Db) -> dict[str, int]:
+        if request.days not in CHECK_DAY_CHOICES:
+            raise HTTPException(400, "geçersiz seçenek")
+        store.set_meta("syllabus_check_days", str(request.days))
+        return {"days": request.days}
 
     @app.post("/v1/tasks", dependencies=guarded)
     def add_task(request: TaskRequest, store: Db) -> dict[str, str]:
@@ -237,7 +279,7 @@ def create_app(
         return {"status": "removed"}
 
     @app.get("/v1/events", dependencies=guarded)
-    def events(store: Db, limit: int = 60) -> list[dict[str, Any]]:
+    def events(store: Db, limit: int = 120) -> list[dict[str, Any]]:
         return [event_json(row, store.get_item(row["item_key"])) for row in store.recent_events(min(limit, 200))]
 
     @app.post("/v1/events/refresh", dependencies=guarded)
@@ -255,6 +297,18 @@ def create_app(
                 return {"refreshed": True}
             time.sleep(POLL_CHECK_SECONDS)
         return {"refreshed": False}
+
+    @app.post("/v1/events/read-all", dependencies=guarded)
+    def read_all(request: ReadAllRequest, store: Db) -> dict[str, str]:
+        if request.source not in ("canvas", "mail"):
+            raise HTTPException(400, "bilinmeyen liste")
+        store.mark_all_read(request.source, datetime.now(UTC))
+        return {"status": "read"}
+
+    @app.post("/v1/events/{event_id}/read", dependencies=guarded)
+    def set_read(event_id: int, request: ReadRequest, store: Db) -> dict[str, str]:
+        store.set_event_read(event_id, request.read, datetime.now(UTC))
+        return {"status": "read" if request.read else "unread"}
 
     @app.delete("/v1/events/{event_id}", dependencies=guarded)
     def delete_event(event_id: int, store: Db) -> dict[str, str]:
@@ -484,7 +538,7 @@ def create_app(
         if not gate:
             raise HTTPException(404, "bu sunucuda GPU kapısı yok")
         if request.mode not in GPU_MODES:
-            raise HTTPException(400, "mode must be auto or image")
+            raise HTTPException(400, "mode must be assistant or compute")
         try:
             httpx.post(f"{gate}/mode", json={"mode": request.mode}, timeout=25.0).raise_for_status()
         except httpx.HTTPError as error:

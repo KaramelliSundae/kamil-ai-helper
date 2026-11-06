@@ -48,3 +48,19 @@ export function timeAgo(iso: string, now: number): string {
 export function isSoon(iso: string, now: number): boolean {
   return new Date(iso).getTime() - now < 24 * 3600 * 1000;
 }
+
+const shortDate = new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' });
+const dayAndMonth = new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' });
+
+/** "14 Kas Cmt" for a calendar day given as 2026-11-14, or "14 Kas" when `plain`. */
+export function shortDay(day: string, plain = false): string {
+  const when = new Date(`${day}T12:00:00`);
+  return (plain ? dayAndMonth : shortDate).format(when);
+}
+
+/** Whole calendar days from `now` to a day given as 2026-11-14: 0 is today, negative has passed. */
+export function daysUntil(day: string, now: number): number {
+  const start = new Date(now);
+  start.setHours(12, 0, 0, 0);
+  return Math.round((new Date(`${day}T12:00:00`).getTime() - start.getTime()) / 86400000);
+}

@@ -7,11 +7,14 @@ failing raises an alert, because a silently expired token is exactly how things 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
+from . import exams
 from .canvas import CanvasAuthError, CanvasClient, CanvasError
 from .config import Settings
+from .docparse import read_here
 from .mailbox import Cursor, Mailbox
 from .models import CRITICAL, HIGH, Item
 from .notify import format_time
@@ -107,6 +110,66 @@ def poll_canvas(canvas: CanvasClient, now: datetime) -> list[Item]:
     return list({item.key: item for item in reversed(items)}.values())
 
 
+EXAM_NAMES = {"midterm": "Vize", "final": "Final"}
+EXAM_SCAN_SECONDS = 120.0  # one round does this much; courses it did not reach wait for the next
+
+
+def _exam_name(found: exams.Found) -> str:
+    return EXAM_NAMES[found.kind] + (f" {found.number}" if found.number else "")
+
+
+def record_exams(store: Store, settings: Settings, course: str, found: list[exams.Found], now: datetime, quiet: bool) -> int:
+    """Stores what was found. Only a firm date is worth a notification, and the very first scan stays quiet."""
+    events = 0
+    for item in found:
+        change = store.put_exam(course, item, exams.TRUST, now)
+        if change and not quiet and item.status == exams.ANNOUNCED:
+            day = item.starts_on.strftime("%d.%m.%Y")
+            verb = "tarihi değişti" if change == "moved" else "tarihi açıklandı"
+            key = f"exam:{course}:{item.kind}:{item.number}"
+            store.add_event(key, "exam", HIGH, f"{course}: {_exam_name(item)} {verb}", f"Tarih: {day}\n{item.evidence}", item.url, now)
+            events += 1
+    return events
+
+
+def update_exams(store: Store, settings: Settings, canvas: CanvasClient, items: list[Item], read_document, now: datetime) -> int:
+    """Announcements and Canvas's own items every round, since they are at hand. Syllabi cost more: every course once, then
+    weekly only for courses whose syllabus has not appeared yet, because it often goes up weeks into the term."""
+    today = now.astimezone(settings.timezone).date()
+    first_run = store.get_meta("exams_baseline") is None
+    known = {row["course"]: row for row in store.exam_courses()}
+    starts = {name: date.fromisoformat(row["term_start"]) for name, row in known.items() if row["term_start"]}
+    events = 0
+    for course, found in exams.exams_in_items(items, today, starts).items():
+        events += record_exams(store, settings, course, exams.best(found, today), now, first_run)
+
+    every = int(store.get_meta("syllabus_check_days") or exams.DEFAULT_CHECK_DAYS)
+    if not every:
+        store.set_meta("exams_baseline", to_text(now))
+        return events
+    began = time.monotonic()
+    finished = True
+    for course_id, course in canvas.courses().items():
+        row = store.exam_course(course_id)
+        if row is not None and (row["has_syllabus"] or now - to_time(row["checked_at"]) < timedelta(days=every)):
+            continue
+        if time.monotonic() - began > EXAM_SCAN_SECONDS:
+            finished = False
+            break
+        try:
+            scan = exams.scan_course(canvas, course_id, today, read_document)
+        except CanvasAuthError:
+            raise
+        except CanvasError as error:
+            log.warning("could not scan a course for exams: %s", error)
+            continue
+        store.put_exam_course(course_id, course, scan.term_start.isoformat() if scan.term_start else None, scan.has_syllabus, scan.hint, now, scan.attendance)
+        events += record_exams(store, settings, course, scan.found, now, first_run)
+    if finished:
+        store.set_meta("exams_baseline", to_text(now))
+    return events
+
+
 def record_failure(store: Store, source: str, error: Exception, now: datetime, immediate: bool = False) -> None:
     key = f"{source}_failures"
     failures = int(store.get_meta(key) or 0) + 1
@@ -151,7 +214,9 @@ def fire_user_reminders(store: Store, now: datetime) -> int:
     return len(rows)
 
 
-def run_poll(store: Store, settings: Settings, canvas: CanvasClient | None, mailbox: Mailbox | None, now: datetime) -> PollResult:
+def run_poll(
+    store: Store, settings: Settings, canvas: CanvasClient | None, mailbox: Mailbox | None, now: datetime, read_document=None,
+) -> PollResult:
     result = PollResult()
 
     if canvas is not None:
@@ -169,6 +234,10 @@ def run_poll(store: Store, settings: Settings, canvas: CanvasClient | None, mail
             result.items += len(items)
             store.set_meta("canvas_baseline", to_text(now))
             clear_failure(store, "Canvas")
+            try:
+                result.events += update_exams(store, settings, canvas, items, read_document or read_here, now)
+            except Exception:  # noqa: BLE001 - the deadlines above are in; exam dates can always wait for the next round
+                log.exception("exam scan failed")
 
     if mailbox is not None:
         raw = store.get_meta("mail_cursor")

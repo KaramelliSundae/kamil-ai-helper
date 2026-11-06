@@ -13,7 +13,6 @@ import { api, Connection } from './api';
 import { chat } from './chatSession';
 import { timeLeft } from './format';
 import { CANVAS, KAMIL, STAGE } from './kamilart/sprites';
-import { imageAppName } from './personal';
 import type { Eye, RobotView, Sprite } from './kamilart/sprites';
 import type { GpuState, Upcoming } from './types';
 import { rounded } from './ui';
@@ -468,7 +467,7 @@ export function SpeechBubble({ line, left, top, width, tail }: { line: string; l
 
 function isAsleep(gpu: GpuState | null | undefined): boolean {
   if (!gpu || gpu.mode === 'phone' || gpu.llmActive) return false;
-  return !!gpu.blocked || !!gpu.keepOffSeconds || gpu.gpuOwner === 'job' || gpu.gpuOwner === 'image' || gpu.mode === 'image';
+  return !!gpu.blocked || !!gpu.keepOffSeconds || gpu.gpuOwner === 'job' || gpu.gpuOwner === 'image' || gpu.mode === 'compute';
 }
 
 const GREETING = 'Merhaba patron, kontrol yapmaya hazırım.';
@@ -479,9 +478,10 @@ const FED_UP_WINDOW_MS = 6000;
 const FED_UP_MS = 5000;
 
 function sleepLine(gpu: GpuState | null | undefined): string {
-  const imageApp = imageAppName.charAt(0).toLocaleUpperCase('tr') + imageAppName.slice(1);
+  const name = gpu?.imageAppName ?? 'görsel uygulaması';
+  const imageApp = name.charAt(0).toLocaleUpperCase('tr') + name.slice(1);
   if (gpu?.gpuOwner === 'image') return `${imageApp} çalışıyor patron, ben biraz uyuyorum. Dokunursanız kalkarım.`;
-  if (gpu?.mode === 'image') return 'GPU görsel üretime ayrıldı patron, ben uyuyorum. Dokunursanız kalkarım.';
+  if (gpu?.mode === 'compute') return 'GPU işlere ayrıldı patron, ben uyuyorum. Dokunursanız kalkarım.';
   if (gpu?.gpuOwner === 'job') return "Aziz Bey GPU'yu işe verdi patron, ben biraz uyuyorum. Dokunursanız kalkarım.";
   if (gpu?.keepOffSeconds) return 'Yeni iş bekleniyormuş patron, uyuyorum. Dokunursanız kalkarım.';
   return 'Şu an uyuyorum patron. Dokunursanız kalkar, yine de kontrol ederim.';

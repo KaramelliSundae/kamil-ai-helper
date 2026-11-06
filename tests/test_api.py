@@ -240,6 +240,52 @@ def test_today_survives_a_stopped_gate(api_settings, sends):
     assert body["gpu"]["llmActive"] is False
 
 
+def test_new_events_start_unread_and_go_read(client, db):
+    now = datetime.now(UTC)
+    db.add_event("mail:5:101", "new", "high", "Mail", "b", "", now)
+    db.add_event("assignment:1", "new", "high", "Odev", "b", "", now)
+    events = {e["itemKey"]: e for e in client.get("/v1/events", headers=AUTH).json()}
+    assert events["mail:5:101"]["read"] is False and events["mail:5:101"]["source"] == "mail"
+    assert events["assignment:1"]["read"] is False and events["assignment:1"]["source"] == "canvas"
+    assert client.post(f"/v1/events/{events['mail:5:101']['id']}/read", json={"read": True}, headers=AUTH).status_code == 200
+    events = {e["itemKey"]: e for e in client.get("/v1/events", headers=AUTH).json()}
+    assert events["mail:5:101"]["read"] is True and events["assignment:1"]["read"] is False
+    client.post(f"/v1/events/{events['mail:5:101']['id']}/read", json={"read": False}, headers=AUTH)
+    assert {e["itemKey"]: e for e in client.get("/v1/events", headers=AUTH).json()}["mail:5:101"]["read"] is False
+
+
+def test_read_all_touches_only_its_own_list(client, db):
+    now = datetime.now(UTC)
+    db.add_event("mail:5:101", "new", "high", "Mail", "b", "", now)
+    db.add_event("system:Mail", "alert", "critical", "Mail sorunu", "b", "", now)
+    db.add_event("assignment:1", "new", "high", "Odev", "b", "", now)
+    db.add_event("system:Canvas", "alert", "critical", "Canvas sorunu", "b", "", now)
+    assert client.post("/v1/events/read-all", json={"source": "mail"}, headers=AUTH).status_code == 200
+    events = {e["itemKey"]: e for e in client.get("/v1/events", headers=AUTH).json()}
+    assert events["mail:5:101"]["read"] and events["system:Mail"]["read"]
+    assert not events["assignment:1"]["read"] and not events["system:Canvas"]["read"]
+    assert client.post("/v1/events/read-all", json={"source": "other"}, headers=AUTH).status_code == 400
+
+
+def test_old_notifications_count_as_read_after_the_upgrade(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite3"
+    Store(path).close()
+    raw = sqlite3.connect(path)
+    raw.execute("ALTER TABLE events RENAME TO events_new")
+    raw.execute("CREATE TABLE events AS SELECT id, item_key, type, level, title, body, url, created_at, sent_at FROM events_new")
+    raw.execute("DROP TABLE events_new")
+    raw.execute("INSERT INTO events (id, item_key, type, level, title, body, url, created_at) VALUES (1, 'a', 'new', 'high', 't', 'b', '', '2026-01-01T00:00:00+00:00')")
+    raw.commit()
+    raw.close()
+    store = Store(path)
+    assert store.recent_events(5)[0]["read_at"] is not None
+    store.add_event("b", "new", "high", "t", "b", "", datetime.now(UTC))
+    assert store.recent_events(5)[0]["read_at"] is None
+    store.close()
+
+
 def test_gpu_counts_what_was_done_today(api_settings, sends, db):
     now = datetime.now(UTC)
     old = now - timedelta(days=2)
@@ -255,7 +301,7 @@ def test_gpu_counts_what_was_done_today(api_settings, sends, db):
 
 def test_without_a_gate_there_is_no_gpu_switch(client):
     assert client.get("/v1/gpu", headers=AUTH).status_code == 404
-    assert client.post("/v1/gpu", json={"mode": "image"}, headers=AUTH).status_code == 404
+    assert client.post("/v1/gpu", json={"mode": "compute"}, headers=AUTH).status_code == 404
     assert client.get("/v1/today", headers=AUTH).json()["gpu"]["llmActive"] is True
 
 

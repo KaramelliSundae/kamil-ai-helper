@@ -12,6 +12,7 @@ happens, and never run code, reach your secrets, or make Kamil act on its own.
 | Raw mail (MIME, headers, HTML, images) | The mail sandbox on the server | Nothing: no network, no secrets, no disk |
 | Mail and Canvas text | The watcher, the agent, the app | Plain text only; nothing is rendered or fetched |
 | Mail images | Decoded in the sandbox, redrawn as new JPEGs | The phone decodes only those JPEGs, and only on tap |
+| Raw mail in phone-only mode | JavaScript on the phone, text only | Attachments and images are never decoded; see below |
 | Links | Shown as text with their real host | Opened only by you, in your browser |
 | Text in the model's prompt | Fenced, with taint tracking | Tools that change state are gated |
 
@@ -42,12 +43,37 @@ parses in the watcher itself. Use that only for testing.
 
 ## Links
 
-Nothing on the server or in the app ever visits a link from content. HTML links keep their real target
+Nothing on the server or in the app ever visits a link from content, with one narrow exception: syllabi often live on OneDrive,
+so the exam scan may fetch `1drv.ms`, `onedrive.live.com` and `*.sharepoint.com` links found on a course's own syllabus page, front
+page or modules. It sends no cookies or credentials, follows redirects by hand and only to those same addresses, stops at 15 MB,
+and accepts only a PDF or Word file, which then goes to the document sandbox. A link that asks for a login simply gives nothing.
+ HTML links keep their real target
 next to their words, so a link cannot hide where it goes. In the app the risk check is plain text
 inspection of the address: hosts under your school domain open directly; everything else asks first and
 shows the real host; bare IP addresses, punycode (look-alike) domains, hidden usernames
 (`https://school.edu@evil.example`) and plain `http` are flagged as suspicious. Service labels such as
 "Microsoft Teams" are given only for the exact domain, never for a look-alike.
+
+## School mail in phone-only mode
+
+There is no sandbox on a phone, so the phone does much less with a mail than the server does:
+
+- **The connection.** `mobile/modules/mail-socket` opens TLS only, with no plain mode and no way to turn the checks off: Android must
+  trust the certificate and the certificate must name the server. A failure stops before the password is sent.
+- **Read-only.** The client uses `EXAMINE` and `BODY.PEEK`, and has no command that changes a mailbox.
+- **Parsing.** `phone/mailparse.ts` is JavaScript. It reads headers and text parts, at most 256 KB of a mail, and lists attachment
+  names without decoding them. No image, attachment or HTML is opened, rendered or fetched, and no link is followed.
+- **The password** is in Android's encrypted storage and goes only to that mail server.
+- **Gemini.** Mail reaches the model only if you turn on **Okul maili Gemini'ye gitsin**. Without it the mail tools are not offered at
+  all, and `get_assignment` refuses mail keys. With it, mail is fenced and taints the turn, as on the server.
+
+## Syllabi and exam dates
+
+A syllabus is untrusted like any attachment. On a server, PDF and Word files are read by `ai-ders-docparse@.service`, the same
+sandbox as the mail parser. What comes out is searched for dates and for sentences about attendance; no model reads the file. A
+date, fixed labels, a short quote shown as plain text and those sentences are all that is kept. Attendance sentences reach the model
+only when you ask about attendance, inside the same untrusted fence as a mail, which limits that turn the same way. In phone-only mode there is no sandbox,
+so files go to Gemini if you have a key and have not turned syllabus reading off, and its answer is searched the same way.
 
 ## Prompt injection
 

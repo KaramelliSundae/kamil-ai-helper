@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -13,6 +14,7 @@ from . import gtasks
 from .canvas import CanvasClient
 from .config import Settings
 from .mailbox import Mailbox
+from .docparse import SandboxedDocumentReader, read_here
 from .mailparse import SandboxedParser, parse_here
 from .notify import ConsoleNotifier, Notifier, SmtpNotifier, flush, format_time, send_digest
 from .store import Store, to_time
@@ -20,7 +22,7 @@ from .watcher import run_poll
 
 log = logging.getLogger(__name__)
 
-GPU_MODES = ("auto", "image")
+GPU_MODES = ("assistant", "compute")
 
 
 def build_canvas(settings: Settings) -> CanvasClient | None:
@@ -43,6 +45,10 @@ def build_mailbox(settings: Settings) -> Mailbox | None:
     )
 
 
+def build_document_reader(settings: Settings) -> Callable[[bytes], str]:
+    return read_here if settings.mail_parser == "inprocess" else SandboxedDocumentReader(settings.doc_parser)
+
+
 def build_notifier(settings: Settings, dry_run: bool) -> Notifier | None:
     """None when mail notifications are not set up: the watcher still runs and the app shows the events."""
     if dry_run:
@@ -58,7 +64,7 @@ def poll(settings: Settings, args: argparse.Namespace) -> int:
     store = Store(settings.db_path)
     canvas = build_canvas(settings)
     try:
-        result = run_poll(store, settings, canvas, build_mailbox(settings), now)
+        result = run_poll(store, settings, canvas, build_mailbox(settings), now, build_document_reader(settings))
         notifier = build_notifier(settings, args.dry_run)
         sent = flush(store, notifier, settings, now) if notifier else 0
     finally:
@@ -120,7 +126,7 @@ def check(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def mode(settings: Settings, args: argparse.Namespace) -> int:
-    """`image` lends the GPU to another program until `auto` gives it back. Needs GPU_GATE_URL."""
+    """`compute` leaves the GPU to work until `assistant` brings the model back. Needs GPU_GATE_URL."""
     url = settings.gpu_gate_url.rstrip("/")
     if not url:
         print("GPU_GATE_URL ayarlı değil")

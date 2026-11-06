@@ -87,6 +87,36 @@ async function list(creds: Creds, path: string, params: Record<string, string | 
   return rows;
 }
 
+async function optional<T>(work: () => Promise<T>, otherwise: T): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof CanvasAuthError) throw error;
+    return otherwise; // many courses switch their files, pages or modules off
+  }
+}
+
+export async function courseInfo(creds: Creds, courseId: number): Promise<Row> {
+  const url = `${creds.url.replace(/\/+$/, '')}/api/v1/courses/${courseId}?${query({ 'include[]': ['syllabus_body', 'term'] })}`;
+  return (await get(creds, url)).body ?? {};
+}
+
+export function frontPage(creds: Creds, courseId: number): Promise<string> {
+  return optional(async () => (await get(creds, `${creds.url.replace(/\/+$/, '')}/api/v1/courses/${courseId}/front_page`)).body?.body ?? '', '');
+}
+
+export function courseFiles(creds: Creds, courseId: number, search: string): Promise<Row[]> {
+  return optional(() => list(creds, `/api/v1/courses/${courseId}/files`, { search_term: search }), []);
+}
+
+export function moduleItems(creds: Creds, courseId: number): Promise<Row[]> {
+  return optional(async () => (await list(creds, `/api/v1/courses/${courseId}/modules`, { 'include[]': 'items' })).flatMap((module) => module.items ?? []), []);
+}
+
+export function activeCourses(creds: Creds): Promise<Map<number, string>> {
+  return courses(creds);
+}
+
 export async function profile(creds: Creds): Promise<{ name: string; email: string }> {
   const { body } = await get(creds, `${creds.url.replace(/\/+$/, '')}/api/v1/users/self/profile`);
   return { name: body?.short_name || body?.name || '', email: body?.primary_email || body?.login_id || '' };

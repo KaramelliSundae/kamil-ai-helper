@@ -132,7 +132,7 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
             <Text>Önceliği bitir</Text>
           </OutlinedButton>
         </>
-      ) : active.length > 0 || !state.llmActive ? (
+      ) : state.mode !== 'compute' && (active.length > 0 || !state.llmActive) ? (
         <Button onClick={() => (gpuJob ? setAsking(true) : void setPriority(true))}>
           <Text>Kamil'i öne al</Text>
         </Button>
@@ -141,17 +141,17 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
       {showModes ? (
         <>
           <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-            GPU'yu başka bir iş için boşaltacaksan Görsel'e al. Kamil'in yerel modeli bu modda cevap veremez.
+            AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta GPU işlere kalır, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
           </Text>
           <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-            <SegmentedButton selected={state.mode === 'auto'} onClick={() => void act(() => api.setGpuMode(connection, 'auto'))}>
+            <SegmentedButton selected={state.mode === 'assistant'} onClick={() => void act(() => api.setGpuMode(connection, 'assistant'))}>
               <SegmentedButton.Label>
-                <Text>Otomatik</Text>
+                <Text>AI-Asistan</Text>
               </SegmentedButton.Label>
             </SegmentedButton>
-            <SegmentedButton selected={state.mode === 'image'} onClick={() => void act(() => api.setGpuMode(connection, 'image'))}>
+            <SegmentedButton selected={state.mode === 'compute'} onClick={() => void act(() => api.setGpuMode(connection, 'compute'))}>
               <SegmentedButton.Label>
-                <Text>Görsel</Text>
+                <Text>Compute</Text>
               </SegmentedButton.Label>
             </SegmentedButton>
           </SingleChoiceSegmentedButtonRow>

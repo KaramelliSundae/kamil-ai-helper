@@ -25,11 +25,14 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from .attendance import find_attendance
 from .store import Store, to_time
 from .text import normalize_tr
 
 BODY_CHARS = 6000
 LIST_LIMIT = 30
+TERM_DAYS = 150
+ANNOUNCEMENTS_READ = 200
 
 
 def schema(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -51,6 +54,12 @@ SCHEMAS = [
     schema("list_announcements", "Son Canvas duyurularını listeler. İsteğe bağlı olarak derse göre süzer.",
            {"course": TEXT, "days": {"type": "integer"}}, ["days"]),
     schema("get_grades", "Bir dersin notlarını getirir.", {"course": TEXT}, ["course"]),
+    schema("get_attendance_rules",
+           "Öğrencinin tüm derslerinin devam zorunluluğu kurallarını syllabus, ders sayfası ve duyurulardan getirir. Devam, "
+           "devamsızlık veya yoklama sorulunca hemen çağır; ders adı sorma, course vermezsen hepsi gelir. Ders adları İngilizce "
+           "olabilir, eşleştirmeyi sen yap. Yazan kuralı ve oranı aktar, yazmayanı uydurma; 'Attendance %10' gibi bir not ağırlığını "
+           "devam zorunluluğu sanma ve bulunamayan dersleri açıkça söyle.",
+           {"course": TEXT}, []),
     schema("search_mail", "Okul mailinde kelimeyle arama yapar.", {"query": TEXT}, ["query"]),
     schema("read_mail", "Bir mailin tamamını getirir. Anahtarı search_mail verir.", {"key": TEXT}, ["key"]),
     schema("remember", "Öğrencinin istediği kalıcı bir bilgiyi kaydeder.", {"text": TEXT}, ["text"]),
@@ -158,6 +167,32 @@ class Tools:
     def tool_get_grades(self, course: str) -> str:
         rows = self.store.grades(course)
         return "\n".join(f"{r['course']} | {r['title']} | {r['grade']}" for r in rows) or "Not bulunamadı."
+
+    def tool_get_attendance_rules(self, course: str | None = None) -> str:
+        courses = self.store.exam_courses()
+        if not courses:
+            return "Dersler henüz taranmadı. Ayarlar'da Sınav taraması kapalı olabilir."
+        wanted = normalize_tr(course) if course else ""
+        # A course may be asked for in another language than Canvas calls it, so no match gives them all to choose from.
+        rows = [row for row in courses if wanted in normalize_tr(row["course"])] or courses
+        since = self.now - timedelta(days=TERM_DAYS)
+        announcements = self.store.items_of_kind("announcement", since, None, ANNOUNCEMENTS_READ)
+        found: list[str] = []
+        missing: list[str] = []
+        for row in rows:
+            notes = [(note["source"], note["text"]) for note in json.loads(row["attendance"])]
+            for item in announcements:
+                if item["course"] == row["course"]:
+                    notes += [("duyuru", note) for note in find_attendance(item["body"])]
+            if notes:
+                found += [f"{row['course']} | {source} | {text}" for source, text in notes]
+            else:
+                why = row["hint"] or ("syllabus var, devamdan söz etmiyor" if row["has_syllabus"] else "syllabus bulunamadı")
+                missing.append(f"{row['course']} ({why})")
+        parts = [self.untrusted("\n".join(found))] if found else []
+        if missing:
+            parts.append("Bilgi bulunamayan dersler: " + "; ".join(missing))
+        return "\n".join(parts)
 
     def tool_search_mail(self, query: str) -> str:
         rows = self.store.search_mail(query, LIST_LIMIT)

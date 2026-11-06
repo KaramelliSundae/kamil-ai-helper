@@ -55,6 +55,7 @@ done
 command -v restorecon >/dev/null && restorecon -R /etc/systemd/system/ai-ders-*
 systemctl daemon-reload
 systemctl enable --now ai-ders-mailparse.socket
+systemctl enable --now ai-ders-docparse.socket
 grep -q '^KEEP_AWAKE=yes' /etc/ai-ders/env && systemctl enable --now ai-ders-keepawake.service
 
 if [[ -f /etc/ai-ders/creds/api_token.cred ]]; then

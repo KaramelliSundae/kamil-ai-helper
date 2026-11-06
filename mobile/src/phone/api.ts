@@ -4,17 +4,21 @@
  */
 import { Linking } from 'react-native';
 
-import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, ItemDetail, Today } from '../types';
+import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, Today } from '../types';
 import { ApiError } from '../types';
 import { answer, geminiModel } from './agent';
 import { GeminiError } from './gemini';
-import { loadPhoneSettings } from './settings';
+import { loadPhoneSettings, saveSyllabusCheckDays } from './settings';
 import { readState, updateState } from './store';
 import { poll } from './watcher';
 
 const UPCOMING_DAYS = 14;
 const EVENT_LIMIT = 100;
 const STALE_MS = 2 * 60_000; // the Today screen polls Canvas itself when the last round is older than this
+
+function eventSource(itemKey: string): EventSource {
+  return itemKey.startsWith('mail:') || itemKey === 'system:mail' ? 'mail' : 'canvas';
+}
 
 async function freshState() {
   const state = await readState();
@@ -50,6 +54,13 @@ export const phoneApi = {
       pendingDrafts: state.drafts.filter((d) => d.status === 'pending').length,
       gpu: { mode: 'phone', llmActive: ready, blocked: ready ? null : "Gemini anahtarı yok, Ayarlar'dan gir" },
       tasksEnabled: false,
+      exams: Object.entries(state.exams ?? {})
+        .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
+        .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
+        .map(([key, exam]) => ({ ...exam, key })),
+      examsMissing: Object.values(state.examCourses ?? {})
+        .filter((row) => !row.hasSyllabus && !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course))
+        .map((row) => ({ course: row.course, hint: row.hint })),
     };
   },
 
@@ -59,8 +70,11 @@ export const phoneApi = {
       const item = state.items[event.itemKey];
       return {
         ...event,
+        // Events from before unread existed count as read.
+        read: event.read ?? true,
+        source: eventSource(event.itemKey),
         current: item
-          ? { title: item.title, course: item.course, dueAt: item.dueAt, submitted: item.submitted, grade: item.grade }
+          ? { postedAt: item.postedAt, title: item.title, course: item.course, dueAt: item.dueAt, submitted: item.submitted, grade: item.grade }
           : null,
       };
     });
@@ -69,6 +83,32 @@ export const phoneApi = {
   async refreshEvents(): Promise<{ refreshed: boolean }> {
     const result = await poll();
     return { refreshed: !result.error };
+  },
+
+  async syllabusCheck(): Promise<{ days: number }> {
+    return { days: (await loadPhoneSettings()).syllabusCheckDays };
+  },
+
+  async setSyllabusCheck(days: number): Promise<{ days: number }> {
+    await saveSyllabusCheckDays(days);
+    return { days };
+  },
+
+  async setEventRead(id: number, read: boolean): Promise<{ status: string }> {
+    await updateState((state) => {
+      const event = state.events.find((other) => other.id === id);
+      if (event) event.read = read;
+    });
+    return { status: read ? 'read' : 'unread' };
+  },
+
+  async markAllRead(source: EventSource): Promise<{ status: string }> {
+    await updateState((state) => {
+      for (const event of state.events) {
+        if (eventSource(event.itemKey) === source) event.read = true;
+      }
+    });
+    return { status: 'read' };
   },
 
   async deleteEvent(id: number): Promise<{ status: string }> {

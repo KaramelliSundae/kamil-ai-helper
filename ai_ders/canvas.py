@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any, Iterator
-from urllib.parse import urlsplit
+from ipaddress import ip_address
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -19,6 +20,7 @@ from .text import html_to_text
 log = logging.getLogger(__name__)
 
 PER_PAGE = 100
+MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024
 MAX_PAGES = 50
 SUBMITTED_STATES = {"submitted", "pending_review", "graded"}
 PLANNER_KINDS = {"quiz": "quiz", "discussion_topic": "discussion", "calendar_event": "event"}
@@ -30,6 +32,16 @@ class CanvasError(Exception):
 
 class CanvasAuthError(CanvasError):
     """The token was refused: it expired, or it was revoked."""
+
+
+def is_public_host(host: str) -> bool:
+    """Not an address on this machine or its network, however a redirect may name it."""
+    if not host or host == "localhost" or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        return ip_address(host).is_global
+    except ValueError:
+        return True
 
 
 def parse_time(value: str | None) -> datetime | None:
@@ -48,6 +60,7 @@ class CanvasClient:
     def __init__(self, base_url: str, token: str, transport: httpx.BaseTransport | None = None):
         self.base_url = base_url.rstrip("/")
         self._origin = urlsplit(self.base_url)[:2]
+        self._transport = transport
         self._client = httpx.Client(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {token}"},
@@ -107,6 +120,64 @@ class CanvasClient:
         rows = self._list("/api/v1/planner/items", {"start_date": start.isoformat(), "end_date": end.isoformat()})
         items = [planner_item(row, courses) for row in rows]
         return [item for item in items if item is not None]
+
+    def course_info(self, course_id: int) -> dict[str, Any]:
+        for page in self._pages(f"/api/v1/courses/{course_id}", {"include[]": ["syllabus_body", "term"]}):
+            return page if isinstance(page, dict) else {}
+        return {}
+
+    def _optional_list(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Many courses switch their files, pages or modules off, which is no failure of Canvas."""
+        try:
+            return self._list(path, params)
+        except CanvasAuthError:
+            raise
+        except CanvasError:
+            return []
+
+    def front_page(self, course_id: int) -> str:
+        try:
+            for page in self._pages(f"/api/v1/courses/{course_id}/front_page"):
+                return (page.get("body") or "") if isinstance(page, dict) else ""
+        except CanvasAuthError:
+            raise
+        except CanvasError:
+            pass
+        return ""
+
+    def course_files(self, course_id: int, search: str) -> list[dict[str, Any]]:
+        return self._optional_list(f"/api/v1/courses/{course_id}/files", {"search_term": search})
+
+    def module_items(self, course_id: int) -> list[dict[str, Any]]:
+        modules = self._optional_list(f"/api/v1/courses/{course_id}/modules", {"include[]": "items"})
+        return [item for module in modules for item in module.get("items") or []]
+
+    def download(self, url: str) -> bytes | None:
+        """A file Canvas itself named. Redirects are followed by hand: the token only ever goes to Canvas's own host, and
+        storage elsewhere gets a plain request. Size limited, and any failure simply gives nothing."""
+        try:
+            with httpx.Client(timeout=60.0, follow_redirects=False, transport=self._transport) as plain:
+                for _ in range(5):
+                    parts = urlsplit(url)
+                    own = parts[:2] == self._origin
+                    if not own and (parts.scheme != "https" or not is_public_host(parts.hostname or "")):
+                        return None
+                    client = self._client if own else plain
+                    with client.stream("GET", url) as response:
+                        if 300 <= response.status_code < 400:
+                            url = urljoin(url, response.headers.get("location", ""))
+                            continue
+                        if response.status_code != 200:
+                            return None
+                        data = bytearray()
+                        for chunk in response.iter_bytes():
+                            data += chunk
+                            if len(data) > MAX_DOWNLOAD_BYTES:
+                                return None
+                        return bytes(data)
+        except httpx.HTTPError:
+            return None
+        return None
 
     def messages(self) -> list[Item]:
         # Listing does not mark anything as read; only opening a single conversation does.

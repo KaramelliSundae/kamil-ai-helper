@@ -1,0 +1,74 @@
+# Reads one untrusted document: raw bytes on stdin, plain text as JSON on stdout, then exits. See ai_ders/docparse.py.
+# It holds nothing worth stealing and can reach nothing: no network, no credentials, no state, no
+# writable disk, a throwaway user, a syscall filter, and limits on memory, time, processes and files.
+[Unit]
+Description=AI Ders document sandbox (one document)
+CollectMode=inactive-or-failed
+
+[Service]
+# -B: no bytecode cache (-I ignores PYTHONDONTWRITEBYTECODE), so it never even tries to write.
+ExecStart=/opt/ai-ders/.venv/bin/python -I -B -m ai_ders.docparse
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+DynamicUser=yes
+PrivateUsers=yes
+UMask=0077
+
+RuntimeMaxSec=30
+MemoryMax=384M
+MemorySwapMax=0
+TasksMax=4
+CPUQuota=100%
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+LimitNOFILE=64
+LimitFSIZE=0
+LimitCORE=0
+
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=none
+PrivateDevices=yes
+PrivateTmp=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/etc/ai-ders -/var/lib/ai-ders
+# Nothing outside the interpreter and its libraries can be executed, so not even a shell starts.
+NoExecPaths=/
+ExecPaths=/opt/ai-ders /usr/lib64 /usr/lib
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+# Exactly what the parser was seen to use under strace (real and broken mails, all four image formats),
+# plus a few harmless calls Python makes on other paths. Anything else kills the process, and the mail
+# shows as unreadable: an exploit that wants a socket, a file write or a new process dies trying.
+SystemCallFilter=access arch_prctl brk close execve exit exit_group fcntl futex getrandom gettid ioctl
+SystemCallFilter=fstat fstatfs newfstatat statx stat lstat getdents64 lseek openat pread64 read readv
+SystemCallFilter=readlink readlinkat write writev mmap mprotect mremap munmap madvise prlimit64 rseq
+SystemCallFilter=rt_sigaction rt_sigprocmask rt_sigreturn sigaltstack set_robust_list set_tid_address
+SystemCallFilter=epoll_create1 epoll_ctl epoll_wait epoll_pwait poll ppoll clock_gettime clock_nanosleep
+SystemCallFilter=nanosleep sched_getaffinity sched_yield getpid getppid getuid geteuid getgid getegid
+SystemCallFilter=getcwd uname sysinfo faccessat faccessat2 dup dup3 shutdown
+# Python probes its socket stdin with socket(); RestrictAddressFamilies=none still refuses every family.
+SystemCallFilter=socket getsockopt getsockname getpeername recvfrom sendto

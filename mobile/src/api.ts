@@ -7,6 +7,7 @@ import type {
   Conversation,
   Draft,
   EventItem,
+  EventSource,
   GeminiSettings,
   GpuState,
   ItemDetail,
@@ -85,6 +86,14 @@ export const api = {
   /** Asks for a fresh look at Canvas and mail now; the list is then read with `events`. */
   refreshEvents: (c: Connection) =>
     c.mode === 'phone' ? phoneApi.refreshEvents() : request<{ refreshed: boolean }>(c, '/v1/events/refresh', 'POST'),
+  syllabusCheck: (c: Connection) =>
+    c.mode === 'phone' ? phoneApi.syllabusCheck() : request<{ days: number }>(c, '/v1/settings/syllabus-check', 'GET'),
+  setSyllabusCheck: (c: Connection, days: number) =>
+    c.mode === 'phone' ? phoneApi.setSyllabusCheck(days) : request<{ days: number }>(c, '/v1/settings/syllabus-check', 'POST', { days }),
+  setEventRead: (c: Connection, id: number, read: boolean) =>
+    c.mode === 'phone' ? phoneApi.setEventRead(id, read) : request<{ status: string }>(c, `/v1/events/${id}/read`, 'POST', { read }),
+  markAllRead: (c: Connection, source: EventSource) =>
+    c.mode === 'phone' ? phoneApi.markAllRead(source) : request<{ status: string }>(c, '/v1/events/read-all', 'POST', { source }),
   deleteEvent: (c: Connection, id: number) =>
     c.mode === 'phone' ? phoneApi.deleteEvent(id) : request<{ status: string }>(c, `/v1/events/${id}`, 'DELETE'),
   send: (c: Connection, text: string, conversationId: number | null, model: ModelId, onSteps?: (steps: string[]) => void) => {

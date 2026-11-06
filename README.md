@@ -2,7 +2,7 @@
 
 Kamil is a personal study assistant for university students who use **Canvas**. It watches your courses,
 reminds you of deadlines on your Android phone, answers questions about your coursework, and writes mail
-drafts that only go out when you approve them. With a server it also reads your school mail (IMAP).
+drafts that only go out when you approve them. It can also read your school mail (IMAP), read-only.
 
 The app's interface is in Turkish.
 
@@ -16,14 +16,14 @@ The app's interface is in Turkish.
 | --- | --- | --- |
 | You need | An Android phone, a Canvas access token, a Gemini API key (only for chat) | The same, plus an always-on Linux machine with systemd |
 | Canvas | The phone checks it about every 15 minutes | The server checks it every 10 minutes |
-| School mail | Not read | Read over IMAP, inside a sandbox |
+| School mail | Optional: the phone reads it over IMAP | Read over IMAP, inside a sandbox |
 | Deadline reminders | Exact alarms 72, 24 and 3 hours before | Same, prepared by the server |
 | Chat model | Gemini 3.8 Flash (cloud) | Gemini, or a local model (llama.cpp, Ollama, LM Studio) |
 | Mail drafts | Open in your phone's mail app; you press send | Sent by the server after you approve them in the app |
 | Google Tasks | No | Optional |
 
-Start with **phone only**: it needs no other machine. Move to a server later if you want mail support or a
-local model. The app has both, you choose in Settings.
+Start with **phone only**: it needs no other machine. Move to a server later if you want it running when your phone is
+off, a sandbox around mail, or a local model. The app has both, you choose in Settings.
 
 ## Phone only: setup
 
@@ -53,6 +53,14 @@ private storage on the phone. **Bu telefondaki verileri sil** in Settings remove
 **What goes to Google:** in chat, your question and the Canvas information Kamil looks up to answer it.
 On Gemini's free tier Google may use this to improve its models; a paid key changes that. Nothing else
 leaves the phone except requests to your Canvas.
+
+### School mail on the phone
+
+In **Ayarlar → Okul maili**, enter your school's IMAP server, your username and your password. Kamil connects over TLS only, on port
+993 unless you write another, and checks the server's certificate and name. It opens the inbox read-only, so unread mail stays unread,
+and it cannot delete or send anything. New mail appears under **Bildirimler → E-posta**, and mail that looks important also notifies
+you. Mail stays out of chat unless you turn on **Okul maili Gemini'ye gitsin**, which sends the mail Kamil reads to Google. Gmail and
+similar services need an app password rather than your normal one. Attachments and images are not opened on the phone.
 
 ## With your own server
 
@@ -118,9 +126,26 @@ is off the GPU he sleeps in his house, behind a door that turns to glass. In **S
 is on its way and says each step as it starts. Tap him too many times and he will tell you what he thinks of that. There is also an old acquaintance of his who drops
 by now and then, if you know how to call him.
 
+## Exams
+
+**Bugün** keeps assignments and exams in two tabs. On first connecting, Kamil looks through every course for midterm and final
+dates: announcements and Canvas items, the syllabus page, syllabus files, and OneDrive links in them. Each date says how far to
+trust it: *Duyuruldu* (announced), *Syllabus* (a date written there), or *Tahmini* (the syllabus only says "week 8", worked out
+from the start of term). A firmer source replaces a weaker one, and a new announced date arrives as a notification.
+
+Announcements are checked every round. A course with no syllabus yet is looked at again every day or every week, as you choose in
+**Ayarlar → Sınav taraması**, or never; once its syllabus is found it is left alone. On a server this costs nothing, so the
+default is every day. In phone-only mode each file read uses a Gemini request, so the default is once a week.
+
+**Attendance.** Ask Kamil in chat what attendance your courses require. The same scan keeps the sentences about it from the syllabus
+page, the course's front page, syllabus files and OneDrive links, and Kamil also looks through announcements. Schools rarely state it
+for every course, so he tells you what is written and which courses say nothing.
+
 ## Notifications and chat
 
-Pull down on **Bildirimler** to check Canvas (and mail, on a server) right away. Each notification shows what
+**Bildirimler** keeps Canvas and mail in two lists, each counting what you have not read. Opening a notification marks it read;
+**Tümünü okundu say** clears a list, and sliding a row can mark it unread again. Pull down to check Canvas and mail
+right away. Each notification shows what
 holds now, not just what was true when it arrived: time left, *Süresi geçti*, *Teslim edildi* or the grade.
 Slide a notification sideways, then tap **Sil** to delete it. While Kamil answers, the chat shows each step it
 is taking.

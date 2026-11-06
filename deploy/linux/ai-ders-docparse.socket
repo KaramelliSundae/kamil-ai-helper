@@ -1,0 +1,14 @@
+[Unit]
+Description=AI Ders document sandbox: one sandboxed reader per document
+
+[Socket]
+ListenStream=/run/ai-ders-docparse.sock
+# Only the ai-ders user (the watcher) may hand it a document.
+SocketUser=ai-ders
+SocketGroup=ai-ders
+SocketMode=0600
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

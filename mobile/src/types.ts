@@ -29,6 +29,8 @@ export type GpuState = {
     cores?: number;
   };
   lastPollAt?: string | null;
+  /** What this server calls the program that comes first on the GPU. */
+  imageAppName?: string | null;
   /** What Kamil has done since midnight. */
   today?: { answers: number; notifications: number };
 };
@@ -40,7 +42,29 @@ export type ServerJob = {
   note: string;
   finishedAt?: number | null;
 };
-export type Today = { upcoming: Upcoming[]; pendingDrafts: number; gpu: GpuState; tasksEnabled?: boolean };
+export type Exam = {
+  key: string;
+  course: string;
+  kind: 'midterm' | 'final';
+  number: number;
+  startsOn: string;
+  endsOn: string | null;
+  /** announced: the teacher said so. syllabus: written there, may change. estimated: only the week is known. */
+  status: 'announced' | 'syllabus' | 'estimated';
+  week: number | null;
+  source: string;
+  evidence: string;
+  url: string;
+};
+export type Today = {
+  upcoming: Upcoming[];
+  pendingDrafts: number;
+  gpu: GpuState;
+  tasksEnabled?: boolean;
+  /** Older servers send neither of these. */
+  exams?: Exam[];
+  examsMissing?: { course: string; hint: string }[];
+};
 export type ItemDetail = {
   key: string;
   kind: string;
@@ -69,6 +93,7 @@ export type ChatSetup = {
 };
 export type GeminiSettings = { connected: boolean; source: 'server' | 'app' | null; model: string; mailAllowed: boolean };
 export type Conversation = { id: number; title: string; updatedAt: string };
+export type EventSource = 'canvas' | 'mail';
 export type EventItem = {
   id: number;
   itemKey: string;
@@ -78,8 +103,11 @@ export type EventItem = {
   body: string;
   url: string;
   createdAt: string;
+  /** Older servers send neither of these. */
+  read?: boolean;
+  source?: EventSource;
   /** The item as it is now; absent for events with no item behind them, such as alerts. */
-  current?: { title: string; course: string; dueAt: string | null; submitted: boolean; grade: string | null } | null;
+  current?: { postedAt?: string | null; title: string; course: string; dueAt: string | null; submitted: boolean; grade: string | null } | null;
   /** Phone mode: already announced by an exact alarm, so the event list shows it without notifying again. */
   silent?: boolean;
 };

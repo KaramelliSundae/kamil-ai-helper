@@ -15,7 +15,6 @@ import {
 } from './kamil';
 import type { Mood } from './kamil';
 import { AZIZ, CANVAS, OFFICE } from './kamilart/sprites';
-import { imageAppName } from './personal';
 import type { GpuState } from './types';
 import { Panel, SectionTitle } from './ui';
 
@@ -66,10 +65,12 @@ export function report(state: GpuState | null, now: Date): Report {
     line = `Emredersiniz patron. Kamil öncelikte, işleri ${minutes(state.prioritySeconds!)} dakika bekletiyorum.`;
   } else if (state.gpuOwner === 'image') {
     aziz = 'busy';
-    line = `Patron, ${imageAppName} çalışıyor. O her zaman önce gelir; biter bitmez Kamil'i geri getiririm.`;
-  } else if (state.mode === 'image') {
+    line = `Patron, ${state.imageAppName ?? 'görsel uygulaması'} çalışıyor. O her zaman önce gelir; biter bitmez Kamil'i geri getiririm.`;
+  } else if (state.mode === 'compute') {
     aziz = 'busy';
-    line = 'Patron, GPU görsel üretime ayrıldı. Otomatik\'e aldığınızda Kamil döner.';
+    line = gpuJob
+      ? `Patron, "${gpuJob.label || gpuJob.id}" işi GPU'da çalışıyor. Compute modundayız, AI-Asistan'a aldığınızda Kamil döner.`
+      : "Patron, GPU işlere ayrıldı. AI-Asistan'a aldığınızda Kamil döner.";
   } else if (gpuJob) {
     aziz = 'busy';
     line = `Patron, "${gpuJob.label || gpuJob.id}" işi GPU'da çalışıyor. Kamil dinleniyor, iş bitince hemen döner.`;

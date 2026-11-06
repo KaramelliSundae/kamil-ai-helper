@@ -1,7 +1,7 @@
 [Unit]
 Description=AI Ders watcher: Canvas and school mail
-Wants=network-online.target ai-ders-mailparse.socket
-After=network-online.target ai-ders-mailparse.socket
+Wants=network-online.target ai-ders-mailparse.socket ai-ders-docparse.socket
+After=network-online.target ai-ders-mailparse.socket ai-ders-docparse.socket
 
 [Service]
 Type=oneshot

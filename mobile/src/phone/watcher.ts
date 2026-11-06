@@ -6,9 +6,11 @@
 import * as Notifications from 'expo-notifications';
 
 import type { EventItem } from '../types';
-import { CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
-import { loadPhoneSettings } from './settings';
-import { PhoneState, StoredItem, updateState } from './store';
+import { activeCourses, CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
+import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, TRUST } from './exams';
+import { ImapAuthError, MailItem, mailProblem, readNewMail } from './mail';
+import { loadMailSettings, loadPhoneSettings, PhoneSettings } from './settings';
+import { PhoneState, readState, StoredItem, updateState } from './store';
 import { fingerprint, shorten } from './text';
 
 const REMINDER_HOURS = [72, 24, 3];
@@ -27,6 +29,7 @@ const KIND_LABELS: Record<string, string> = {
   event: 'Yeni etkinlik',
   announcement: 'Duyuru',
   message: 'Canvas mesajı',
+  mail: 'Mail',
 };
 
 const time = new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -54,13 +57,13 @@ function details(item: CanvasItem): string {
 }
 
 function addEvent(state: PhoneState, event: Omit<EventItem, 'id'>): void {
-  state.events.push({ id: state.nextEventId, ...event });
+  state.events.push({ id: state.nextEventId, read: false, ...event });
   state.nextEventId += 1;
 }
 
 type Change = { type: 'new' | 'due_changed' | 'graded' | 'updated'; oldDue?: string | null };
 
-function upsert(state: PhoneState, item: CanvasItem, now: string): Change[] {
+function upsert(state: PhoneState, item: CanvasItem & { level?: string }, now: string): Change[] {
   const old = state.items[item.key];
   state.items[item.key] = { ...item, firstSeen: old?.firstSeen ?? now, lastSeen: now };
   if (!old) return [{ type: 'new' }];
@@ -71,10 +74,10 @@ function upsert(state: PhoneState, item: CanvasItem, now: string): Change[] {
   return changes;
 }
 
-function recordChange(state: PhoneState, item: CanvasItem, change: Change, now: Date): void {
+function recordChange(state: PhoneState, item: CanvasItem & { level?: string }, change: Change, now: Date): void {
   const base = { itemKey: item.key, type: change.type, url: item.url, createdAt: now.toISOString() };
   if (change.type === 'new') {
-    addEvent(state, { ...base, level: deadlineLevel(item.dueAt, now), title: `${KIND_LABELS[item.kind] ?? 'Yeni'}: ${label(item)}`, body: details(item) });
+    addEvent(state, { ...base, level: item.level ?? deadlineLevel(item.dueAt, now), title: `${KIND_LABELS[item.kind] ?? 'Yeni'}: ${label(item)}`, body: details(item) });
   } else if (change.type === 'due_changed') {
     const before = change.oldDue ? formatTime(change.oldDue) : 'yoktu';
     const after = item.dueAt ? formatTime(item.dueAt) : 'kaldırıldı';
@@ -155,6 +158,61 @@ async function syncAlarms(state: PhoneState, now: Date): Promise<void> {
   state.scheduled = [...new Set([...state.scheduled.slice(-1500), ...wanted.keys()])];
 }
 
+const EXAM_NAMES = { midterm: 'Vize', final: 'Final' };
+const COURSES_PER_ROUND = 2; // a background round has little time, and each file is a Gemini request
+
+function recordExams(state: PhoneState, course: string, found: FoundExam[], now: Date, quiet: boolean): void {
+  state.exams ??= {};
+  for (const exam of found) {
+    const key = `exam:${course}:${exam.kind}:${exam.number}`;
+    const old = state.exams[key];
+    if (old && TRUST[old.status] > TRUST[exam.status]) continue;
+    if (old && old.startsOn === exam.startsOn && old.status === exam.status) continue;
+    state.exams[key] = { ...exam, course };
+    if (!quiet && exam.status === 'announced') {
+      const verb = old && old.status === exam.status ? 'tarihi değişti' : 'tarihi açıklandı';
+      const name = EXAM_NAMES[exam.kind] + (exam.number ? ` ${exam.number}` : '');
+      addEvent(state, {
+        itemKey: key, type: 'exam', level: 'high', title: `${course}: ${name} ${verb}`,
+        body: `Tarih: ${exam.startsOn.split('-').reverse().join('.')}\n${exam.evidence}`, url: exam.url, createdAt: now.toISOString(),
+      });
+    }
+  }
+}
+
+/** Announcements every round. Syllabi a course or two at a time, and only until a course's syllabus has been found. */
+async function scanExams(settings: PhoneSettings, items: CanvasItem[], now: Date): Promise<void> {
+  const creds = { url: settings.canvasUrl, token: settings.canvasToken };
+  const known = (await readState()).examCourses ?? {};
+  const starts: Record<string, Date> = {};
+  for (const row of Object.values(known)) {
+    if (row.termStart) starts[row.course] = new Date(`${row.termStart}T00:00:00`);
+  }
+  const fromItems = examsInItems(items, now, starts);
+  const every = settings.syllabusCheckDays;
+  const scans: { id: number; course: string; scan: CourseScan }[] = [];
+  if (every) {
+    const courses = await activeCourses(creds);
+    const gemini = settings.geminiKey ? { key: settings.geminiKey, model: settings.geminiModel } : null;
+    for (const [id, course] of courses) {
+      if (scans.length >= COURSES_PER_ROUND) break;
+      const row = known[String(id)];
+      if (row && (row.hasSyllabus || now.getTime() - Date.parse(row.checkedAt) < every * 86400000)) continue;
+      scans.push({ id, course, scan: await scanCourse(creds, id, now, gemini) });
+    }
+  }
+  await updateState((state) => {
+    const quiet = !state.meta.examsBaselineAt;
+    for (const [course, found] of Object.entries(fromItems)) recordExams(state, course, bestExams(found, now), now, quiet);
+    state.examCourses ??= {};
+    for (const { id, course, scan } of scans) {
+      state.examCourses[String(id)] = { course, termStart: scan.termStart, hasSyllabus: scan.hasSyllabus, checkedAt: now.toISOString(), hint: scan.hint, attendance: scan.attendance };
+      recordExams(state, course, scan.found, now, quiet);
+    }
+    if (!scans.length) state.meta.examsBaselineAt ??= now.toISOString();
+  });
+}
+
 export type PollResult = { items: number; events: number; error: string | null };
 
 /** One round: Canvas, then changes, reminders and alarms. The first round only learns what exists. */
@@ -168,7 +226,18 @@ export async function poll(now = new Date()): Promise<PollResult> {
   } catch (error) {
     failure = error;
   }
-  return updateState(async (state) => {
+  // Each source fails on its own: Canvas being down never stops mail, and the other way round.
+  const mailSettings = await loadMailSettings();
+  let mail: { items: MailItem[]; cursor: { uidvalidity: number; lastUid: number } } | null = null;
+  let mailFailure: unknown = null;
+  if (mailSettings.host && mailSettings.password) {
+    try {
+      mail = await readNewMail(mailSettings, (await readState()).meta.mailCursor ?? null, now);
+    } catch (error) {
+      mailFailure = error;
+    }
+  }
+  const result = await updateState(async (state) => {
     const before = state.events.length;
     const stamp = now.toISOString();
     if (failure) {
@@ -191,6 +260,24 @@ export async function poll(now = new Date()): Promise<PollResult> {
       state.meta.canvasFailures = 0;
       state.meta.lastError = undefined;
     }
+    if (mailFailure) {
+      const failures = (state.meta.mailFailures ?? 0) + 1;
+      state.meta.mailFailures = failures;
+      state.meta.mailError = mailProblem(mailFailure);
+      if (failures === FAILURES_BEFORE_ALERT || (mailFailure instanceof ImapAuthError && failures === 1)) {
+        addEvent(state, { itemKey: 'system:mail', type: 'alert', level: 'high', title: 'Mail takibi çalışmıyor', body: state.meta.mailError, url: '', createdAt: stamp });
+      }
+    } else if (mail) {
+      const firstRun = !state.meta.mailCursor; // the last days are read quietly, so a new account does not ring for all of them
+      for (const item of mail.items) {
+        for (const change of upsert(state, item, stamp)) {
+          if (!firstRun) recordChange(state, item, change, now);
+        }
+      }
+      state.meta.mailCursor = mail.cursor;
+      state.meta.mailFailures = 0;
+      state.meta.mailError = undefined;
+    }
     addReminders(state, now);
     await syncAlarms(state, now).catch(() => undefined); // alarms are a bonus; events still record everything
     state.meta.lastPollAt = stamp;
@@ -200,4 +287,6 @@ export async function poll(now = new Date()): Promise<PollResult> {
       error: failure ? state.meta.lastError ?? 'Canvas okunamadı' : null,
     };
   });
+  if (!failure) await scanExams(settings, items, now).catch(() => undefined); // exam dates can always wait for the next round
+  return result;
 }

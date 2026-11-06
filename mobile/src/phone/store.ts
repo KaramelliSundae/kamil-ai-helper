@@ -6,6 +6,8 @@
 import { File, Paths } from 'expo-file-system';
 
 import type { EventItem } from '../types';
+import type { AttendanceNote } from './attendance';
+import type { FoundExam } from './exams';
 
 export type StoredItem = {
   key: string;
@@ -19,6 +21,8 @@ export type StoredItem = {
   postedAt: string | null;
   grade: string | null;
   submitted: boolean;
+  /** Mail only: how important it looked. */
+  level?: string;
   firstSeen: string;
   lastSeen: string;
 };
@@ -35,11 +39,16 @@ export type StoredDraft = {
   status: 'pending' | 'opened' | 'discarded';
 };
 
+export type StoredExam = FoundExam & { course: string };
+
 export type PhoneState = {
   version: 1;
   items: Record<string, StoredItem>;
   events: EventItem[];
   nextEventId: number;
+  /** Absent in data saved before exams existed. */
+  exams?: Record<string, StoredExam>;
+  examCourses?: Record<string, { course: string; termStart: string | null; hasSyllabus: boolean; checkedAt: string; hint: string; attendance?: AttendanceNote[] }>;
   conversations: StoredConversation[];
   chat: StoredChat[];
   nextConversationId: number;
@@ -52,9 +61,13 @@ export type PhoneState = {
   scheduled: string[];
   meta: {
     baselineAt?: string;
+    examsBaselineAt?: string;
     lastPollAt?: string;
     lastError?: string;
     canvasFailures?: number;
+    mailCursor?: { uidvalidity: number; lastUid: number };
+    mailFailures?: number;
+    mailError?: string;
     firstName?: string;
     schoolDomain?: string;
     nextReminderId?: number;
@@ -63,6 +76,7 @@ export type PhoneState = {
 
 const FILE_NAME = 'kamil-phone.json';
 const EVENT_LIMIT = 300;
+const MAIL_LIMIT = 300; // mail is kept whole on the phone, so only the newest
 const CHAT_LIMIT = 2000;
 const CONVERSATION_LIMIT = 100;
 const MEMORY_LIMIT = 60;
@@ -103,6 +117,11 @@ export async function readState(): Promise<PhoneState> {
 
 function trim(state: PhoneState, now: number): void {
   state.events = state.events.slice(-EVENT_LIMIT);
+  const mail = Object.values(state.items).filter((item) => item.kind === 'mail');
+  if (mail.length > MAIL_LIMIT) {
+    mail.sort((a, b) => (a.postedAt ?? '').localeCompare(b.postedAt ?? ''));
+    for (const item of mail.slice(0, mail.length - MAIL_LIMIT)) delete state.items[item.key];
+  }
   state.conversations = state.conversations.slice(-CONVERSATION_LIMIT);
   const kept = new Set(state.conversations.map((c) => c.id));
   state.chat = state.chat.filter((row) => kept.has(row.conversationId)).slice(-CHAT_LIMIT);

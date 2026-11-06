@@ -42,7 +42,7 @@ def tools(store):
 def test_tool_names_are_a_closed_read_mostly_list():
     names = {s["function"]["name"] for s in SCHEMAS}
     assert names == {
-        "list_upcoming", "get_assignment", "list_announcements", "get_grades", "search_mail",
+        "list_upcoming", "get_assignment", "list_announcements", "get_grades", "get_attendance_rules", "search_mail",
         "read_mail", "remember", "set_reminder", "draft_email",
     }
 

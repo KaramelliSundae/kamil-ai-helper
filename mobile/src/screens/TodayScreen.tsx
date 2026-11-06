@@ -7,6 +7,8 @@ import {
   LazyColumn,
   LoadingIndicator,
   Row,
+  SegmentedButton,
+  SingleChoiceSegmentedButtonRow,
   Surface,
   Text,
   useMaterialColors,
@@ -16,13 +18,13 @@ import type { BuiltinShape } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
-import { api, Connection, GpuState, ItemDetail, Upcoming } from '../api';
+import { api, Connection, Exam, GpuState, ItemDetail, Upcoming } from '../api';
 import { DetailSheet } from '../DetailSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { TodayKamil } from '../kamil';
 import { guest } from '../husamettin';
 import { ServerStatus } from '../ServerStatus';
-import { formatDate, isSoon, longDate, timeLeft } from '../format';
+import { daysUntil, formatDate, isSoon, longDate, shortDay, timeLeft } from '../format';
 import { icons } from '../icons';
 import { Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
@@ -44,6 +46,54 @@ function sharesGpu(gpu: GpuState): boolean {
 function modelStatus(gpu: GpuState): string {
   if (gpu.llmActive) return 'Kamil hazır';
   return gpu.blocked ? `Kamil bekliyor: ${gpu.blocked}` : 'Kamil açılıyor';
+}
+
+const EXAM_STATUS = { announced: 'Duyuruldu', syllabus: 'Syllabus', estimated: 'Tahmini' } as const;
+
+function examName(exam: Exam): string {
+  return (exam.kind === 'midterm' ? 'Vize' : 'Final') + (exam.number ? ` ${exam.number}` : '');
+}
+
+function examWhen(exam: Exam): string {
+  if (exam.status !== 'estimated' || !exam.endsOn) return shortDay(exam.startsOn);
+  return `${exam.week}. hafta · ${shortDay(exam.startsOn, true)} – ${shortDay(exam.endsOn, true)}`;
+}
+
+function ExamRow({ exam, now, onOpen }: { exam: Exam; now: number; onOpen: () => void }) {
+  const colors = useMaterialColors();
+  const left = daysUntil(exam.startsOn, now);
+  const near = exam.status !== 'estimated' && left <= 7;
+  const firm = exam.status === 'announced';
+  return (
+    <Panel onClick={onOpen}>
+      <Row horizontalArrangement={{ spacedBy: 14 }} verticalAlignment="center">
+        <ShapeIcon
+          icon={icons.quiz}
+          shape={exam.kind === 'final' ? shapes.Boom : shapes.Clover4Leaf}
+          container={near ? colors.errorContainer : colors.secondaryContainer}
+          content={near ? colors.onErrorContainer : colors.onSecondaryContainer}
+        />
+        <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 2 }}>
+          <Text color={colors.primary} style={{ typography: 'labelLarge', fontWeight: '600' }}>{exam.course}</Text>
+          <Text color={colors.onSurface} style={{ typography: 'titleMedium', fontWeight: '600' }}>{examName(exam)}</Text>
+          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>{examWhen(exam)}</Text>
+          <Row horizontalArrangement={{ spacedBy: 8 }} verticalAlignment="center">
+            <Surface
+              color={firm ? colors.tertiaryContainer : colors.surfaceContainerHighest}
+              contentColor={firm ? colors.onTertiaryContainer : colors.onSurfaceVariant}
+              shape={rounded(50)}>
+              <Text modifiers={[padding(10, 4, 10, 4)]} style={{ typography: 'labelMedium', fontWeight: '700' }}>{EXAM_STATUS[exam.status]}</Text>
+            </Surface>
+            {left >= 0 ? (
+              <Text color={near ? colors.error : colors.onSurfaceVariant} style={{ typography: 'labelMedium', fontWeight: '700' }}>
+                {left === 0 ? 'Bugün' : left === 1 ? 'Yarın' : `${left} gün kaldı`}
+              </Text>
+            ) : null}
+          </Row>
+        </Column>
+      </Row>
+    </Panel>
+  );
 }
 
 function DueRow({ item, now, onOpen, onAddTask, onRemoveTask }: {
@@ -139,6 +189,8 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
   const { data, error, refreshing, refresh } = useLoad(load);
   const [open, setOpen] = useState<Upcoming | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'work' | 'exams'>('work');
+  const [openExam, setOpenExam] = useState<Exam | null>(null);
   const [removing, setRemoving] = useState<Upcoming | null>(null);
   const now = Date.now();
   const tasksEnabled = !!data?.tasksEnabled;
@@ -166,6 +218,19 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
       setTaskError(reason instanceof Error ? reason.message : "Google Tasks'tan çıkarılamadı.");
     }
   };
+
+  const exams = data?.exams ?? [];
+  const missing = data?.examsMissing ?? [];
+  const renderExam = useCallback(
+    ({ item }: { item: Exam }) => (
+      <ExamRow
+        exam={item}
+        now={Date.now()}
+        onOpen={() => setOpenExam(item)}
+      />
+    ),
+    [],
+  );
 
   const renderRow = useCallback(
     ({ item }: { item: Upcoming }) => (
@@ -208,14 +273,44 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
             </FilledTonalButton>
           </Panel>
         ) : null}
-        {data && data.upcoming.length > 0 ? (
+        {data ? (
+          <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
+            <SegmentedButton selected={tab === 'work'} onClick={() => setTab('work')}>
+              <SegmentedButton.Label>
+                <Text>{data.upcoming.length ? `Ödevler (${data.upcoming.length})` : 'Ödevler'}</Text>
+              </SegmentedButton.Label>
+            </SegmentedButton>
+            <SegmentedButton selected={tab === 'exams'} onClick={() => setTab('exams')}>
+              <SegmentedButton.Label>
+                <Text>{exams.length ? `Sınavlar (${exams.length})` : 'Sınavlar'}</Text>
+              </SegmentedButton.Label>
+            </SegmentedButton>
+          </SingleChoiceSegmentedButtonRow>
+        ) : null}
+        {tab === 'work' && data ? (
           <Text color={colors.onSurfaceVariant} modifiers={[paddingAll(4)]} style={{ typography: 'titleSmall', fontWeight: '600' }}>
-            Önümüzdeki 14 gün
+            {data.upcoming.length ? 'Önümüzdeki 14 gün' : 'Önümüzdeki 14 günde teslim yok.'}
           </Text>
         ) : null}
-        <LazyColumn.Items data={data?.upcoming ?? []} keyExtractor={(item) => item.key} estimatedItemSize={110}>
-          {renderRow}
-        </LazyColumn.Items>
+        {tab === 'exams' && data && !exams.length && !missing.length ? (
+          <Notice>Henüz sınav tarihi bulamadım. Duyuruları ve syllabus'ları taramaya devam ediyorum.</Notice>
+        ) : null}
+        {tab === 'work' ? (
+          <LazyColumn.Items data={data?.upcoming ?? []} keyExtractor={(item) => item.key} estimatedItemSize={110}>
+            {renderRow}
+          </LazyColumn.Items>
+        ) : (
+          <LazyColumn.Items data={exams} keyExtractor={(exam) => exam.key} estimatedItemSize={120}>
+            {renderExam}
+          </LazyColumn.Items>
+        )}
+        {tab === 'exams' && missing.length ? (
+          <Notice>
+            {`Tarihi bulunamayan: ${missing.map((row) => row.course).join(', ')}. Syllabus eklenince kendim bakarım.${
+              missing.some((row) => row.hint) ? ` ${[...new Set(missing.map((row) => row.hint).filter(Boolean))].join(' ')}.` : ''
+            }`}
+          </Notice>
+        ) : null}
       </LazyColumn>
       {removing ? (
         <ConfirmDialog
@@ -224,6 +319,18 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
           confirm="Çıkar"
           onConfirm={() => void removeTask(removing)}
           onCancel={() => setRemoving(null)}
+        />
+      ) : null}
+      {openExam ? (
+        <DetailSheet
+          connection={connection}
+          target={{
+            key: openExam.key,
+            title: `${openExam.course}: ${examName(openExam)}`,
+            body: `${examWhen(openExam)}\n${EXAM_STATUS[openExam.status]}${openExam.evidence ? `\n\n${openExam.evidence}` : ''}`,
+            url: openExam.url,
+          }}
+          onClose={() => setOpenExam(null)}
         />
       ) : null}
       {open ? (

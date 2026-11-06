@@ -37,6 +37,7 @@ STEP_LABELS = {
     "get_assignment": "Ödevin ayrıntılarını okuyor",
     "list_announcements": "Duyurulara bakıyor",
     "get_grades": "Notlara bakıyor",
+    "get_attendance_rules": "Devam kurallarına bakıyor",
     "search_mail": "Maillerde arıyor",
     "read_mail": "Maili okuyor",
     "remember": "Not kaydetmeyi deniyor",

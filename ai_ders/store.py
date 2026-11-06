@@ -6,6 +6,9 @@ done, so a failed send is retried on the next run instead of being lost.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 import hashlib
 import json
 import sqlite3
@@ -71,6 +74,29 @@ CREATE TABLE IF NOT EXISTS chat (
   created_at TEXT NOT NULL,
   conversation_id INTEGER
 );
+CREATE TABLE IF NOT EXISTS exams (
+  course TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  starts_on TEXT NOT NULL,
+  ends_on TEXT,
+  status TEXT NOT NULL,
+  week INTEGER,
+  source TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  url TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (course, kind, number)
+);
+CREATE TABLE IF NOT EXISTS exam_courses (
+  course_id INTEGER PRIMARY KEY,
+  course TEXT NOT NULL,
+  term_start TEXT,
+  has_syllabus INTEGER NOT NULL DEFAULT 0,
+  checked_at TEXT NOT NULL,
+  hint TEXT NOT NULL DEFAULT '',
+  attendance TEXT NOT NULL DEFAULT '[]'
+);
 CREATE TABLE IF NOT EXISTS memories (
   id INTEGER PRIMARY KEY,
   text TEXT NOT NULL,
@@ -93,6 +119,11 @@ CREATE TABLE IF NOT EXISTS drafts (
   warnings TEXT NOT NULL DEFAULT ''
 );
 """
+
+
+def event_source(item_key: str) -> str:
+    """Which list a notification belongs in. A problem with reading mail belongs with the mail."""
+    return "mail" if item_key.startswith("mail:") or item_key == "system:Mail" else "canvas"
 
 
 def to_text(value: datetime | None) -> str | None:
@@ -149,9 +180,12 @@ class Store:
         self._add_column("conversations", "tainted", "INTEGER NOT NULL DEFAULT 0")
         self._add_column("memories", "untrusted", "INTEGER NOT NULL DEFAULT 0")
         self._add_column("drafts", "warnings", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("exam_courses", "attendance", "TEXT NOT NULL DEFAULT '[]'")
         self.db.execute("CREATE INDEX IF NOT EXISTS chat_conversation ON chat (conversation_id)")
         self.db.commit()
         self._never_reuse_event_ids()
+        self._start_read_marks()
+        self.db.commit()
 
     def _never_reuse_event_ids(self) -> None:
         """The phone remembers which event ids it has shown. Without AUTOINCREMENT, deleting the newest event
@@ -177,6 +211,13 @@ class Store:
             raise
         finally:
             self.db.isolation_level = ""
+
+    def _start_read_marks(self) -> None:
+        """Everything from before unread existed counts as read: it was seen long ago, and a wall of unread helps nobody."""
+        if "read_at" in {row["name"] for row in self.db.execute("PRAGMA table_info(events)")}:
+            return
+        self.db.execute("ALTER TABLE events ADD COLUMN read_at TEXT")
+        self.db.execute("UPDATE events SET read_at = created_at")
 
     def _add_column(self, table: str, column: str, declaration: str) -> None:
         if column not in {row["name"] for row in self.db.execute(f"PRAGMA table_info({table})")}:
@@ -284,6 +325,16 @@ class Store:
         self.db.execute("DELETE FROM events WHERE id = ?", (event_id,))
         self.db.commit()
 
+    def set_event_read(self, event_id: int, read: bool, now: datetime) -> None:
+        self.db.execute("UPDATE events SET read_at = ? WHERE id = ?", (to_text(now) if read else None, event_id))
+        self.db.commit()
+
+    def mark_all_read(self, source: str, now: datetime) -> None:
+        rows = self.db.execute("SELECT id, item_key FROM events WHERE read_at IS NULL").fetchall()
+        ids = [(to_text(now), row["id"]) for row in rows if event_source(row["item_key"]) == source]
+        self.db.executemany("UPDATE events SET read_at = ? WHERE id = ?", ids)
+        self.db.commit()
+
     def recent_events(self, limit: int) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 
@@ -343,6 +394,45 @@ class Store:
     def delete_all_conversations(self) -> None:
         self.db.execute("DELETE FROM chat")
         self.db.execute("DELETE FROM conversations")
+        self.db.commit()
+
+    def put_exam(self, course: str, found: Any, trust: dict[str, int], now: datetime) -> str | None:
+        """Keeps what was found unless something firmer is already known. Says what changed: 'new', 'moved', or nothing."""
+        old = self.db.execute(
+            "SELECT * FROM exams WHERE course = ? AND kind = ? AND number = ?", (course, found.kind, found.number)
+        ).fetchone()
+        starts = found.starts_on.isoformat()
+        if old is not None and trust[old["status"]] > trust[found.status]:
+            return None
+        if old is not None and old["starts_on"] == starts and old["status"] == found.status:
+            return None
+        self.db.execute(
+            "INSERT OR REPLACE INTO exams (course, kind, number, starts_on, ends_on, status, week, source, evidence, url, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (course, found.kind, found.number, starts, found.ends_on.isoformat() if found.ends_on else None, found.status,
+             found.week, found.source, found.evidence, found.url, to_text(now)),
+        )
+        self.db.commit()
+        return "new" if old is None or old["status"] != found.status else "moved"
+
+    def exams(self) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM exams ORDER BY starts_on").fetchall()
+
+    def exam_course(self, course_id: int) -> sqlite3.Row | None:
+        return self.db.execute("SELECT * FROM exam_courses WHERE course_id = ?", (course_id,)).fetchone()
+
+    def exam_courses(self) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM exam_courses").fetchall()
+
+    def put_exam_course(
+        self, course_id: int, course: str, term_start: str | None, has_syllabus: bool, hint: str, now: datetime,
+        attendance: Sequence[dict[str, str]] = (),
+    ) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO exam_courses (course_id, course, term_start, has_syllabus, checked_at, hint, attendance)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (course_id, course, term_start, int(has_syllabus), to_text(now), hint, json.dumps(list(attendance), ensure_ascii=False)),
+        )
         self.db.commit()
 
     def work_since(self, since: datetime) -> dict[str, int]:

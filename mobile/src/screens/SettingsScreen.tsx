@@ -27,7 +27,10 @@ import { ServerStatus } from '../ServerStatus';
 import { api, Connection, GeminiSettings, saveConnection, ServerConnection } from '../api';
 import { askForNotifications, notificationsAllowed, sendTestNotification } from '../background';
 import { icons } from '../icons';
-import { DEFAULT_GEMINI_MODEL, loadPhoneSettings, modelChoices } from '../phone/settings';
+import { checkMailAccount, forgetMail, mailProblem, parseMailHost } from '../phone/mail';
+import { DEFAULT_GEMINI_MODEL, loadMailSettings, loadPhoneSettings, modelChoices, saveMailAccount, saveMailToGemini } from '../phone/settings';
+import { readState } from '../phone/store';
+import { poll } from '../phone/watcher';
 import { connectPhone, forgetPhone } from '../phone/setup';
 import { Header, Notice, Panel, ShapeIcon, shapes, SectionTitle } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
@@ -147,7 +150,7 @@ function PhonePanel({ connection, onSaved }: Props) {
   return (
     <Panel>
       <SectionTitle icon={icons.today} title="Telefon" />
-      <Hint>Sunucu gerekmez: telefon Canvas'a ve Gemini'ye kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul maili bu modda okunmaz.</Hint>
+      <Hint>Sunucu gerekmez: telefon Canvas'a ve Gemini'ye kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul mailini aşağıdan ekleyebilirsin.</Hint>
       <Field label="Canvas adresi" placeholder="https://canvas.okulun.edu" state={urlState} onChange={setUrl} uri />
       <Field label="Canvas erişim belirteci" state={tokenState} onChange={setToken} secret />
       <Hint>Canvas'ta Hesap → Ayarlar → Yeni erişim belirteci. Kamil bununla yalnızca okur, hiçbir şey göndermez.</Hint>
@@ -194,6 +197,107 @@ function PhonePanel({ connection, onSaved }: Props) {
           </AlertDialog.DismissButton>
         </AlertDialog>
       ) : null}
+    </Panel>
+  );
+}
+
+/** School mail on the phone itself: read-only, over TLS only, and kept from Gemini unless the student says otherwise. */
+function PhoneMailPanel({ connection }: { connection: Connection | null }) {
+  const colors = useMaterialColors();
+  const hostState = useNativeState('');
+  const userState = useNativeState('');
+  const passwordState = useNativeState('');
+  const [host, setHost] = useState('');
+  const [user, setUser] = useState('');
+  const [password, setPassword] = useState('');
+  const [connected, setConnected] = useState(false);
+  const [toGemini, setToGemini] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadMailSettings().then((saved) => {
+      hostState.set(saved.host);
+      setHost(saved.host);
+      userState.set(saved.user);
+      setUser(saved.user);
+      setConnected(!!saved.host);
+      setToGemini(saved.toGemini);
+    });
+    void readState().then((state) => setError(state.meta.mailError ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const count = await checkMailAccount({ host: host.trim(), user: user.trim(), password });
+      await saveMailAccount(host.trim(), user.trim(), password);
+      passwordState.set('');
+      setPassword('');
+      setConnected(true);
+      setMessage(`Bağlandı. Gelen kutusunda ${count} mail var. Son iki hafta sessizce okunacak, yeni gelenler Bildirimler'de görünür.`);
+      if (connection?.mode === 'phone') void poll().catch(() => undefined);
+    } catch (reason) {
+      setError(mailProblem(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    await forgetMail();
+    hostState.set('');
+    setHost('');
+    userState.set('');
+    setUser('');
+    passwordState.set('');
+    setPassword('');
+    setConnected(false);
+    setToGemini(false);
+    setError(null);
+    setMessage('Mail hesabı ve okunan mailler bu telefondan silindi.');
+  };
+
+  return (
+    <Panel>
+      <SectionTitle icon={icons.mail} title="Okul maili" />
+      <Hint>Telefon mailini kendisi okur, yalnızca şifreli bağlantıyla. Okunmamış mail okunmamış kalır; Kamil mail silmez, göndermez. Şifren yalnızca bu telefonda, şifreli durur.</Hint>
+      <Field label="Mail sunucusu (IMAP)" placeholder="posta.okulun.edu.tr" state={hostState} onChange={setHost} uri />
+      <Field label="Kullanıcı adı veya mail adresi" state={userState} onChange={setUser} uri />
+      <Field label={connected ? 'Şifre (değiştirmek için)' : 'Şifre'} state={passwordState} onChange={setPassword} secret />
+      <Hint>Sunucu adını okulunun bilgi işleminden öğrenebilirsin. Gmail gibi servisler normal şifre yerine uygulama şifresi ister.</Hint>
+      {connected ? (
+        <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+          <Column modifiers={[weight(1)]}>
+            <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili Gemini'ye gitsin</Text>
+            <Hint>Kapalıyken mailler yalnızca Bildirimler'de durur, sohbette Gemini görmez. Açarsan Kamil'in okuduğu mail metinleri Google'a gider.</Hint>
+          </Column>
+          <Switch
+            value={toGemini}
+            onCheckedChange={(on) => {
+              setToGemini(on);
+              void saveMailToGemini(on);
+            }}
+          />
+        </Row>
+      ) : null}
+      <Busy
+        busy={busy}
+        label={connected ? 'Kaydet ve dene' : 'Bağlan'}
+        enabled={!!parseMailHost(host) && user.trim().length > 0 && password.length > 0}
+        onClick={() => void save()}
+      />
+      {connected ? (
+        <OutlinedButton onClick={() => void remove()}>
+          <Text>Mail hesabını kaldır</Text>
+        </OutlinedButton>
+      ) : null}
+      {message ? <Notice>{message}</Notice> : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
     </Panel>
   );
 }
@@ -324,6 +428,47 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
   );
 }
 
+const SYLLABUS_CHOICES = [
+  { days: 1, label: 'Her gün' },
+  { days: 7, label: 'Haftada bir' },
+  { days: 0, label: 'Kapalı' },
+];
+
+/** A course's syllabus often goes up weeks into the term, so a course without one is looked at again. How often is up to the student. */
+function SyllabusCheckPanel({ connection }: { connection: Connection }) {
+  const colors = useMaterialColors();
+  const [days, setDays] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.syllabusCheck(connection).then((reply) => { if (live) setDays(reply.days); }, () => undefined);
+    return () => { live = false; };
+  }, [connection]);
+  if (days === null) return null; // an older server has no such setting
+  const choose = (next: number) => {
+    setDays(next);
+    void api.setSyllabusCheck(connection, next).catch(() => undefined);
+  };
+  return (
+    <Panel>
+      <SectionTitle icon={icons.quiz} title="Sınav taraması" />
+      <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+        {connection.mode === 'phone'
+          ? "Duyurular her kontrolde taranır. Syllabus'u henüz bulunmayan dersler ise burada seçtiğin sıklıkla yeniden bakılır; bulununca bir daha bakılmaz. Her dosya bir Gemini isteği harcar. Kapalıyken Gemini'ye dosya gitmez."
+          : "Duyurular her kontrolde taranır. Syllabus'u henüz bulunmayan dersler ise burada seçtiğin sıklıkla yeniden bakılır; bulununca bir daha bakılmaz. Dosyalar sunucunda okunur, API ücreti yoktur."}
+      </Text>
+      <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
+        {SYLLABUS_CHOICES.map((choice) => (
+          <SegmentedButton key={choice.days} selected={days === choice.days} onClick={() => choose(choice.days)}>
+            <SegmentedButton.Label>
+              <Text>{choice.label}</Text>
+            </SegmentedButton.Label>
+          </SegmentedButton>
+        ))}
+      </SingleChoiceSegmentedButtonRow>
+    </Panel>
+  );
+}
+
 export function SettingsScreen({ connection, onSaved }: Props) {
   const colors = useMaterialColors();
   const [mode, setMode] = useState<'phone' | 'server'>(connection?.mode ?? 'phone');
@@ -357,6 +502,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
       </Panel>
 
       {mode === 'phone' ? <PhonePanel connection={connection} onSaved={onSaved} /> : <ServerPanel connection={connection} onSaved={onSaved} />}
+      {mode === 'phone' ? <PhoneMailPanel connection={connection} /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerReport connection={connection} /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerStatus connection={connection} showModes /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerGeminiPanel connection={connection} /> : null}
@@ -379,6 +525,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
         )}
       </Panel>
 
+      {connection ? <SyllabusCheckPanel connection={connection} /> : null}
       <UpdatePanel connection={connection} />
     </Column>
   );

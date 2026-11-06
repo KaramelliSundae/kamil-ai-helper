@@ -69,6 +69,7 @@ class Settings:
     api_token: str | None = field(default=None, repr=False)
     google_tasks: str | None = field(default=None, repr=False)
     gemini_key: str | None = field(default=None, repr=False)
+    doc_parser: str = "/run/ai-ders-docparse.sock"
 
     @property
     def db_path(self) -> Path:
@@ -102,6 +103,7 @@ class Settings:
             gemini_model=get("GEMINI_MODEL", "gemini-3.8-flash"),
             # The sandbox's socket. "inprocess" parses unsandboxed, for development only.
             mail_parser=get("MAIL_PARSER_SOCKET", "/run/ai-ders-mailparse.sock"),
+            doc_parser=get("DOC_PARSER_SOCKET", "/run/ai-ders-docparse.sock"),
             # Mail from addresses under this domain counts as the school's; by default the student's own.
             school_domain=(get("SCHOOL_DOMAIN") or (get("MAIL_USER") or "").rpartition("@")[2]).lower(),
             webmail_url=get("WEBMAIL_URL") or "",

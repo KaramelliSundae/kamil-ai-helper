@@ -10,6 +10,7 @@ dependencies = [
   "httpx>=0.28",
   "imap-tools>=1.9",
   "pillow>=11",
+  "pypdf>=5",
   "uvicorn>=0.54",
 ]
 
