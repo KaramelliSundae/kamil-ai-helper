@@ -10,10 +10,10 @@ const day = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', 
 
 const NEAR_EXAM_DAYS = 7;
 
-/** What needs attention first: whatever is within a week, however sure, then announced dates, then the rest. Soonest first in each. */
+/** What needs attention first: a known date within a week, then announced dates, then the rest. Soonest first in each. An estimate is only a guess at the week, so it never goes above a known date. */
 export function examOrder<T extends { status: string; startsOn: string }>(exams: T[], now: number): T[] {
   const rank = (exam: T) => {
-    if (daysUntil(exam.startsOn, now) <= NEAR_EXAM_DAYS) return 0;
+    if (exam.status !== 'estimated' && daysUntil(exam.startsOn, now) <= NEAR_EXAM_DAYS) return 0;
     return exam.status === 'announced' ? 1 : 2;
   };
   return [...exams].sort((a, b) => rank(a) - rank(b) || a.startsOn.localeCompare(b.startsOn));
