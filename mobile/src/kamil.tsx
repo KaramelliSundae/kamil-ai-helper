@@ -1330,7 +1330,7 @@ function PopSign({ text, unit, color, cycle }: { text: string; unit: number; col
   return (
     <Animated.Text
       style={{
-        position: 'absolute', left: 0.42 * unit, top: -2.42 * unit, fontSize: 0.5 * unit, fontWeight: '800', color,
+        position: 'absolute', left: 0.68 * unit, top: -2.6 * unit, fontSize: 0.5 * unit, fontWeight: '800', color,
         opacity: cycle.interpolate({ inputRange: [0, 0.5, 0.62, 0.86, 1], outputRange: [0, 0, 1, 1, 0] }),
         transform: [{ translateY: cycle.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.14 * unit, 0.14 * unit, -0.14 * unit] }) }],
       }}>
@@ -1369,7 +1369,7 @@ function Clipboard({ unit, cycle, writing }: { unit: number; cycle: Animated.Val
   );
 }
 
-const THINK_ARM = 0.72;
+const THINK_ARM = 0.9;
 const CHECK_ARM = 0.26;
 const WRITE_ARM = 0.42;
 const SIGN_MS = 3400;
@@ -1435,7 +1435,7 @@ export function WaitingFigure({ label }: { label: string }) {
             <>
               {activity === 'think' ? null : <Clipboard unit={unit} cycle={cycle} writing={activity === 'write'} />}
               {activity === 'write' ? null : (
-                <PopSign text={activity === 'think' ? '?' : '✓'} unit={unit} color={activity === 'think' ? '#c9a24a' : '#3f8f55'} cycle={cycle} />
+                <PopSign text={activity === 'think' ? '?' : '✓'} unit={unit} color={activity === 'think' ? '#6b5012' : '#3f8f55'} cycle={cycle} />
               )}
             </>
           )}
