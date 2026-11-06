@@ -421,6 +421,11 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
         </Column>
         <LazyRow modifiers={[fillMaxWidth()]} contentPadding={{ start: 16, end: 16 }} horizontalArrangement={{ spacedBy: 8 }}>
           {courses.length > 1 ? <CoursePicker courses={courses} course={course} onChange={setCourse} /> : null}
+          <FilterChip key="all" selected={filter === 'all'} onClick={() => setFilter('all')}>
+            <FilterChip.Label>
+              <Text>{`Tümü ${ofCourse.filter((event) => matches(event, 'all')).length}`}</Text>
+            </FilterChip.Label>
+          </FilterChip>
           {chips.map((option) => (
             <FilterChip key={option.id} selected={filter === option.id} onClick={() => setFilter(filter === option.id ? 'all' : option.id)}>
               <FilterChip.Label>
