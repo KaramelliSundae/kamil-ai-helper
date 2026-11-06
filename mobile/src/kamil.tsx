@@ -1320,7 +1320,8 @@ type Activity = 'think' | 'check' | 'write';
 /** The step labels are fixed strings, so what he acts out is what the model is really doing at that moment. */
 export function activityOf(label: string): Activity {
   if (/hazırlıyor|kaydetmeyi|kurmayı/i.test(label)) return 'write';
-  if (/bakıyor|okuyor|arıyor|Okunan metin/i.test(label)) return 'check';
+  // Tools finish at once, so most of a check is the model going over what they found: that counts too.
+  if (/bakıyor|okuyor|arıyor|değerlendiriyor|Okunan metin/i.test(label)) return 'check';
   return 'think';
 }
 
