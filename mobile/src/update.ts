@@ -7,13 +7,18 @@
 import * as Application from 'expo-application';
 import { File, Paths } from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
+import * as Notifications from 'expo-notifications';
+import { AppState } from 'react-native';
 
+import { cancelDownload, downloadWithNotification, wasCancelled } from '../modules/app-update';
 import { api, Connection, Release, serverUrl } from './api';
+import { CHANNEL_DEFAULT } from './phone/watcher';
 
 // A fork changes this to its own repository. Releases hold two files: latest.json and kamil.apk.
 const RELEASES = 'https://github.com/KaramelliSundae/kamil-ai-helper/releases/latest/download';
 const APK_TYPE = 'application/vnd.android.package-archive';
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
+const READY_NOTICE = 'update-ready';
 
 export function installedVersion(): { code: number; name: string } {
   return { code: Number(Application.nativeBuildVersion ?? 0), name: Application.nativeApplicationVersion ?? '?' };
@@ -53,28 +58,116 @@ export async function findUpdate(connection: Connection | null): Promise<Release
   return latest && latest.versionCode > installed ? latest : null;
 }
 
-export async function installUpdate(connection: Connection | null, release: Release): Promise<void> {
-  const target = new File(Paths.cache, 'ai-ders-update.apk');
-  if (target.exists) target.delete();
-  let apk: File;
+export type UpdateStage =
+  | { kind: 'idle' }
+  | { kind: 'downloading'; fraction: number | null; cancellable: boolean }
+  | { kind: 'checking' }
+  | { kind: 'installing' };
+
+// Kept out here because the panel on Bugün and the one in Ayarlar show the same download, and it outlives both.
+let stage: UpdateStage = { kind: 'idle' };
+let running: Promise<void> | null = null;
+const watchers = new Set<() => void>();
+
+function setStage(next: UpdateStage): void {
+  stage = next;
+  watchers.forEach((watcher) => watcher());
+}
+
+export const updateStage = {
+  subscribe(watcher: () => void): () => void {
+    watchers.add(watcher);
+    return () => watchers.delete(watcher);
+  },
+  get: () => stage,
+};
+
+export function cancelUpdate(): void {
+  cancelDownload();
+}
+
+async function askToNotify(): Promise<void> {
   try {
-    apk = release.source === 'server' && connection?.mode === 'server'
-      ? await File.downloadFileAsync(`${serverUrl(connection)}/v1/app/apk`, target, {
-        headers: { Authorization: `Bearer ${connection.token}` },
-      })
-      : await File.downloadFileAsync(`${RELEASES}/kamil.apk`, target);
+    if (!(await Notifications.getPermissionsAsync()).granted) await Notifications.requestPermissionsAsync();
   } catch {
-    throw new Error(release.source === 'server'
-      ? 'Güncelleme indirilemedi. Telefonda Tailscale açık mı?'
-      : 'Güncelleme indirilemedi. İnternet bağlantını kontrol et.');
+    // The panel shows the progress too.
   }
-  if ((await apk.digest('SHA-256')) !== release.sha256) {
-    apk.delete();
-    throw new Error('İndirilen dosya bozuk çıktı, tekrar dene.');
+}
+
+async function download(connection: Connection | null, release: Release, target: File): Promise<void> {
+  const fromServer = release.source === 'server' && connection?.mode === 'server';
+  const url = fromServer ? `${serverUrl(connection)}/v1/app/apk` : `${RELEASES}/kamil.apk`;
+  const headers: Record<string, string> = fromServer ? { Authorization: `Bearer ${connection.token}` } : {};
+  setStage({ kind: 'downloading', fraction: null, cancellable: true });
+  try {
+    await downloadWithNotification(url, headers, target.uri, `Kamil ${release.versionName} indiriliyor`, ({ done, total }) => {
+      setStage({ kind: 'downloading', fraction: total > 0 ? done / total : null, cancellable: true });
+    });
+    return;
+  } catch (reason) {
+    if (wasCancelled(reason)) throw reason;
   }
+  // The notification is a nicety. Whatever went wrong with it, the update must still get through.
+  setStage({ kind: 'downloading', fraction: null, cancellable: false });
+  if (target.exists) target.delete();
+  try {
+    await File.downloadFileAsync(url, target, { headers });
+  } catch {
+    throw new Error(fromServer ? 'Güncelleme indirilemedi. Telefonda Tailscale açık mı?' : 'Güncelleme indirilemedi. İnternet bağlantını kontrol et.');
+  }
+}
+
+/** Android will not open the installer over another app, so a download that ends in the background waits for the student. */
+async function untilOnScreen(release: Release): Promise<void> {
+  if (AppState.currentState === 'active') return;
+  await Notifications.scheduleNotificationAsync({
+    identifier: READY_NOTICE,
+    content: { title: `Kamil ${release.versionName} hazır`, body: 'Kurmak için dokun.' },
+    trigger: { channelId: CHANNEL_DEFAULT },
+  }).catch(() => undefined);
+  await new Promise<void>((resolve) => {
+    const watcher = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      watcher.remove();
+      resolve();
+    });
+  });
+  await Notifications.dismissNotificationAsync(READY_NOTICE).catch(() => undefined);
+}
+
+async function downloadAndInstall(connection: Connection | null, release: Release): Promise<void> {
+  const target = new File(Paths.cache, 'ai-ders-update.apk');
+  setStage({ kind: 'checking' });
+  // A download whose installer was closed, or that finished after the app was gone, needs no second download.
+  const ready = target.exists && (await target.digest('SHA-256')) === release.sha256;
+  if (!ready) {
+    if (target.exists) target.delete();
+    await askToNotify();
+    await download(connection, release, target);
+    setStage({ kind: 'checking' });
+    if ((await target.digest('SHA-256')) !== release.sha256) {
+      target.delete();
+      throw new Error('İndirilen dosya bozuk çıktı, tekrar dene.');
+    }
+  }
+  setStage({ kind: 'installing' });
+  await untilOnScreen(release);
   await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-    data: apk.contentUri,
+    data: target.contentUri,
     type: APK_TYPE,
     flags: FLAG_GRANT_READ_URI_PERMISSION,
   });
+}
+
+/** Resolves when the installer is closed or the student cancelled the download. Asking twice joins the first. */
+export function installUpdate(connection: Connection | null, release: Release): Promise<void> {
+  running ??= downloadAndInstall(connection, release)
+    .catch((reason: unknown) => {
+      if (!wasCancelled(reason)) throw reason;
+    })
+    .finally(() => {
+      running = null;
+      setStage({ kind: 'idle' });
+    });
+  return running;
 }

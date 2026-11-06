@@ -7,8 +7,6 @@ import {
   LazyColumn,
   LoadingIndicator,
   Row,
-  SegmentedButton,
-  SingleChoiceSegmentedButtonRow,
   Surface,
   Text,
   useMaterialColors,
@@ -19,6 +17,7 @@ import { useCallback, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
 import { api, Connection, Exam, GpuState, ItemDetail, Upcoming } from '../api';
+import { courseIcon } from '../courseIcon';
 import { DetailSheet } from '../DetailSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { TodayKamil } from '../kamil';
@@ -26,7 +25,7 @@ import { guest } from '../husamettin';
 import { ServerStatus } from '../ServerStatus';
 import { daysUntil, formatDate, isSoon, longDate, shortDay, timeLeft } from '../format';
 import { icons } from '../icons';
-import { Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
+import { Choices, Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
 import { useLoad } from '../useLoad';
 
@@ -68,7 +67,7 @@ function ExamRow({ exam, now, onOpen }: { exam: Exam; now: number; onOpen: () =>
     <Panel onClick={onOpen}>
       <Row horizontalArrangement={{ spacedBy: 14 }} verticalAlignment="center">
         <ShapeIcon
-          icon={icons.quiz}
+          icon={courseIcon(exam.course)}
           shape={exam.kind === 'final' ? shapes.Boom : shapes.Clover4Leaf}
           container={near ? colors.errorContainer : colors.secondaryContainer}
           content={near ? colors.onErrorContainer : colors.onSecondaryContainer}
@@ -274,18 +273,14 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
           </Panel>
         ) : null}
         {data ? (
-          <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-            <SegmentedButton selected={tab === 'work'} onClick={() => setTab('work')}>
-              <SegmentedButton.Label>
-                <Text>{data.upcoming.length ? `Ödevler (${data.upcoming.length})` : 'Ödevler'}</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-            <SegmentedButton selected={tab === 'exams'} onClick={() => setTab('exams')}>
-              <SegmentedButton.Label>
-                <Text>{exams.length ? `Sınavlar (${exams.length})` : 'Sınavlar'}</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-          </SingleChoiceSegmentedButtonRow>
+          <Choices
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'work', label: 'Ödevler', count: data.upcoming.length },
+              { value: 'exams', label: 'Sınavlar', count: exams.length },
+            ]}
+          />
         ) : null}
         {tab === 'work' && data ? (
           <Text color={colors.onSurfaceVariant} modifiers={[paddingAll(4)]} style={{ typography: 'titleSmall', fontWeight: '600' }}>

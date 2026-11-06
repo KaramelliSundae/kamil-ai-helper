@@ -108,7 +108,8 @@ hostile text cannot write its own status on the screen.
 The app updates only from your own server or from this project's GitHub Releases, and only when you tap. It compares
 version numbers, downloads the APK, checks its SHA-256, and hands it to Android's installer. Android asks you to confirm
 and refuses any APK not signed with the key of the installed app, so a tampered download or a stranger's build cannot
-replace it. The check sends GitHub nothing about you beyond the request itself.
+replace it. The check sends GitHub nothing about you beyond the request itself. The download runs in a foreground service, so
+that Android does not freeze it when you leave the app; that is the only use of the foreground service permission.
 
 ## The other server services
 

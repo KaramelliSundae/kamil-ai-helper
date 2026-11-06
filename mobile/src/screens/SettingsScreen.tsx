@@ -8,8 +8,6 @@ import {
   OutlinedButton,
   OutlinedTextField,
   Row,
-  SegmentedButton,
-  SingleChoiceSegmentedButtonRow,
   Spacer,
   SuggestionChip,
   Switch,
@@ -32,7 +30,7 @@ import { DEFAULT_GEMINI_MODEL, loadMailSettings, loadPhoneSettings, modelChoices
 import { readState } from '../phone/store';
 import { poll } from '../phone/watcher';
 import { connectPhone, forgetPhone } from '../phone/setup';
-import { Header, Notice, Panel, ShapeIcon, shapes, SectionTitle } from '../ui';
+import { Choices, Header, Notice, Panel, ShapeIcon, shapes, SectionTitle } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
 
 type Props = { connection: Connection | null; onSaved: (connection: Connection | null) => void };
@@ -429,9 +427,9 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
 }
 
 const SYLLABUS_CHOICES = [
-  { days: 1, label: 'Her gün' },
-  { days: 7, label: 'Haftada bir' },
-  { days: 0, label: 'Kapalı' },
+  { value: 1, label: 'Her gün' },
+  { value: 7, label: 'Haftada bir' },
+  { value: 0, label: 'Kapalı' },
 ];
 
 /** A course's syllabus often goes up weeks into the term, so a course without one is looked at again. How often is up to the student. */
@@ -450,21 +448,13 @@ function SyllabusCheckPanel({ connection }: { connection: Connection }) {
   };
   return (
     <Panel>
-      <SectionTitle icon={icons.quiz} title="Sınav taraması" />
+      <SectionTitle icon={icons.school} title="Sınav taraması" />
       <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
         {connection.mode === 'phone'
           ? "Duyurular her kontrolde taranır. Syllabus'u henüz bulunmayan dersler ise burada seçtiğin sıklıkla yeniden bakılır; bulununca bir daha bakılmaz. Her dosya bir Gemini isteği harcar. Kapalıyken Gemini'ye dosya gitmez."
           : "Duyurular her kontrolde taranır. Syllabus'u henüz bulunmayan dersler ise burada seçtiğin sıklıkla yeniden bakılır; bulununca bir daha bakılmaz. Dosyalar sunucunda okunur, API ücreti yoktur."}
       </Text>
-      <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-        {SYLLABUS_CHOICES.map((choice) => (
-          <SegmentedButton key={choice.days} selected={days === choice.days} onClick={() => choose(choice.days)}>
-            <SegmentedButton.Label>
-              <Text>{choice.label}</Text>
-            </SegmentedButton.Label>
-          </SegmentedButton>
-        ))}
-      </SingleChoiceSegmentedButtonRow>
+      <Choices value={days} onChange={choose} options={SYLLABUS_CHOICES} />
     </Panel>
   );
 }
@@ -487,18 +477,14 @@ export function SettingsScreen({ connection, onSaved }: Props) {
         <Text color={colors.onSurface} style={{ typography: 'titleMedium', fontWeight: '700' }}>
           Kamil nerede çalışsın?
         </Text>
-        <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-          <SegmentedButton selected={mode === 'phone'} onClick={() => setMode('phone')}>
-            <SegmentedButton.Label>
-              <Text>Sadece telefon</Text>
-            </SegmentedButton.Label>
-          </SegmentedButton>
-          <SegmentedButton selected={mode === 'server'} onClick={() => setMode('server')}>
-            <SegmentedButton.Label>
-              <Text>Kendi sunucum</Text>
-            </SegmentedButton.Label>
-          </SegmentedButton>
-        </SingleChoiceSegmentedButtonRow>
+        <Choices
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'phone', label: 'Sadece telefon' },
+            { value: 'server', label: 'Kendi sunucum' },
+          ]}
+        />
       </Panel>
 
       {mode === 'phone' ? <PhonePanel connection={connection} onSaved={onSaved} /> : <ServerPanel connection={connection} onSaved={onSaved} />}

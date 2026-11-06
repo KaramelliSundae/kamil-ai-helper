@@ -8,6 +8,7 @@ import {
   Spacer,
   Surface,
   Text,
+  ToggleButton,
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
 import {
@@ -21,6 +22,7 @@ import {
   Shapes,
   size,
   weight,
+  width,
   wrapContentWidth,
 } from '@expo/ui/jetpack-compose/modifiers';
 import type { BuiltinShape } from '@expo/ui/jetpack-compose/modifiers';
@@ -35,16 +37,26 @@ export function rounded(radius: number) {
   return Shape.RoundedCorner({ cornerRadii: { topStart: radius, topEnd: radius, bottomStart: radius, bottomEnd: radius } });
 }
 
+/** A row in a grouped list: the ends of a group are round, the rows between almost touch. */
+export function groupedShape(first: boolean, last: boolean) {
+  const top = first ? 24 : 6;
+  const bottom = last ? 24 : 6;
+  return Shape.RoundedCorner({ cornerRadii: { topStart: top, topEnd: top, bottomStart: bottom, bottomEnd: bottom } });
+}
+
 /** Expressive screens open with a large, heavy headline instead of a small app bar. */
-export function Header({ title, subtitle }: { title: string; subtitle?: string }) {
+export function Header({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: ReactNode }) {
   const colors = useMaterialColors();
   const insets = useSafeAreaInsets();
   return (
     <Column modifiers={[fillMaxWidth()]}>
       <Spacer modifiers={[height(insets.top + 12)]} />
-      <Text color={colors.onSurface} style={{ typography: 'displaySmall', fontWeight: '700', letterSpacing: -0.5 }}>
-        {title}
-      </Text>
+      <Row modifiers={[fillMaxWidth()]} verticalAlignment="center">
+        <Text color={colors.onSurface} modifiers={[weight(1)]} style={{ typography: 'displaySmall', fontWeight: '700', letterSpacing: -0.5 }}>
+          {title}
+        </Text>
+        {actions}
+      </Row>
       {subtitle ? (
         <Text color={colors.onSurfaceVariant} style={{ typography: 'titleMedium' }}>
           {subtitle}
@@ -110,6 +122,52 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
 }
 
 export const shapes = Shapes.Material;
+
+export type Choice<T> = { value: T; label: string; count?: number };
+
+/**
+ * One of a few, as Material's toggle buttons: their corners morph on Compose's own spring, so the animation does not wait
+ * for JavaScript. It only plays if this stays mounted, so keep it outside anything that is re-created by a `key`.
+ */
+export function Choices<T extends string | number>({ options, value, onChange }: {
+  options: Choice<T>[];
+  value: T | null | undefined;
+  onChange: (value: T) => void;
+}) {
+  const colors = useMaterialColors();
+  return (
+    <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 4 }}>
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <ToggleButton
+            key={option.value}
+            checked={checked}
+            // Tapping the one already chosen changes nothing: there is always exactly one.
+            onCheckedChange={() => {
+              if (!checked) onChange(option.value);
+            }}
+            modifiers={[weight(1)]}>
+            <Text maxLines={1} overflow="ellipsis" style={{ typography: 'labelLarge', fontWeight: '600' }}>{option.label}</Text>
+            {option.count ? (
+              <>
+                <Spacer modifiers={[width(6)]} />
+                <Surface color={checked ? colors.onPrimary : colors.primary} shape={rounded(50)}>
+                  <Text
+                    color={checked ? colors.primary : colors.onPrimary}
+                    modifiers={[padding(6, 1, 6, 1)]}
+                    style={{ typography: 'labelSmall', fontWeight: '700' }}>
+                    {String(option.count)}
+                  </Text>
+                </Surface>
+              </>
+            ) : null}
+          </ToggleButton>
+        );
+      })}
+    </Row>
+  );
+}
 
 /**
  * Pull to refresh with the indicator centred below the status bar. @expo/ui would pin it top-left, and

@@ -108,7 +108,8 @@ with your own key: `mobile/sign-release.sh kamil.apk` creates one on first use (
 installs an update signed with the same key as the installed app, so switching keys needs one uninstall.
 
 **Updates in server mode:** run `mobile/publish.sh` on the server after building there. Phones then show
-*Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256.
+*Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256. Its progress shows in the app and in
+the notifications, and it carries on if you leave the app.
 
 **Updates from GitHub:** with no server, or a server with nothing newer to offer, **Ayarlar → Uygulama** checks this
 repository's [Releases](../../releases), and **Bugün** shows *Yeni sürüm hazır* when there is one. The download is checked
@@ -143,12 +144,12 @@ for every course, so he tells you what is written and which courses say nothing.
 
 ## Notifications and chat
 
-**Bildirimler** keeps Canvas and mail in two lists, each counting what you have not read. Opening a notification marks it read;
-**Tümünü okundu say** clears a list, and sliding a row can mark it unread again. Pull down to check Canvas and mail
-right away. Each notification shows what
-holds now, not just what was true when it arrived: time left, *Süresi geçti*, *Teslim edildi* or the grade.
-Slide a notification sideways, then tap **Sil** to delete it. While Kamil answers, the chat shows each step it
-is taking.
+**Bildirimler** keeps Canvas and mail in two lists, each counting what you have not read, grouped by day with the newest
+first. The chips above the list narrow it by kind or by course and say how many each holds. Opening a notification marks it
+read; the two buttons at the top mark a whole list read or delete what you have read in it. Pull down to check Canvas and mail
+right away. Each notification shows what holds now, not just what was true when it arrived: time left, *Süresi geçti*,
+*Teslim edildi* or the grade. Slide a notification sideways for **Okundu** and **Sil**. While Kamil answers, the chat shows each
+step it is taking.
 
 ## Sharing the GPU
 

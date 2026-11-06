@@ -52,6 +52,18 @@ export function isSoon(iso: string, now: number): boolean {
 const shortDate = new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' });
 const dayAndMonth = new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' });
 
+const clock = new Intl.DateTimeFormat('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+/** "14:05" */
+export function clockTime(ms: number): string {
+  return clock.format(new Date(ms));
+}
+
+/** "14 Kas" */
+export function dayMonth(ms: number): string {
+  return dayAndMonth.format(new Date(ms));
+}
+
 /** "14 Kas Cmt" for a calendar day given as 2026-11-14, or "14 Kas" when `plain`. */
 export function shortDay(day: string, plain = false): string {
   const when = new Date(`${day}T12:00:00`);

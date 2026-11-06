@@ -3,8 +3,6 @@ import {
   Column,
   OutlinedButton,
   Row,
-  SegmentedButton,
-  SingleChoiceSegmentedButtonRow,
   Text,
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
@@ -15,7 +13,7 @@ import { api, ServerConnection } from './api';
 import { ConfirmDialog } from './ConfirmDialog';
 import { icons } from './icons';
 import type { GpuState, ServerJob } from './types';
-import { Notice, Panel, SectionTitle } from './ui';
+import { Choices, Notice, Panel, SectionTitle } from './ui';
 
 const REFRESH_MS = 5000;
 const STATUS: Record<string, string> = {
@@ -76,6 +74,8 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
   const [lastPollAt, setLastPollAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  // Shown at once: the server's answer takes a moment, and a button that waits for it looks broken.
+  const [choosing, setChoosing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const next = await api.gpu(connection);
@@ -107,6 +107,11 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
   const gpuJob = active.some((job) => job.gpu && job.status === 'running');
   const priority = state.prioritySeconds ?? 0;
   const setPriority = (on: boolean) => act(() => api.setKamilPriority(connection, on));
+  const chooseMode = async (mode: string) => {
+    setChoosing(mode);
+    await act(() => api.setGpuMode(connection, mode));
+    setChoosing(null);
+  };
 
   return (
     <Panel>
@@ -143,18 +148,14 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
           <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
             AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta GPU işlere kalır, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
           </Text>
-          <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-            <SegmentedButton selected={state.mode === 'assistant'} onClick={() => void act(() => api.setGpuMode(connection, 'assistant'))}>
-              <SegmentedButton.Label>
-                <Text>AI-Asistan</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-            <SegmentedButton selected={state.mode === 'compute'} onClick={() => void act(() => api.setGpuMode(connection, 'compute'))}>
-              <SegmentedButton.Label>
-                <Text>Compute</Text>
-              </SegmentedButton.Label>
-            </SegmentedButton>
-          </SingleChoiceSegmentedButtonRow>
+          <Choices
+            value={choosing ?? state.mode}
+            onChange={(mode) => void chooseMode(mode)}
+            options={[
+              { value: 'assistant', label: 'AI-Asistan' },
+              { value: 'compute', label: 'Compute' },
+            ]}
+          />
         </>
       ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

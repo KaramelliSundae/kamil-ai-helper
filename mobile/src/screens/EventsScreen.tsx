@@ -2,30 +2,32 @@ import {
   Box,
   Button,
   Column,
+  DropdownMenu,
+  DropdownMenuItem,
+  FilledTonalButton,
   FilterChip,
   HorizontalPager,
   HorizontalPagerHandle,
   Icon,
+  IconButton,
   LazyColumn,
   LazyRow,
   LoadingIndicator,
   Row,
-  SegmentedButton,
-  SingleChoiceSegmentedButtonRow,
   Surface,
   Text,
-  TextButton,
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
-import { fillMaxSize, fillMaxWidth, height, onSizeChanged, paddingAll, Shapes, weight, width } from '@expo/ui/jetpack-compose/modifiers';
+import { fillMaxSize, fillMaxWidth, height, onSizeChanged, padding, paddingAll, Shapes, weight, width } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api, Connection, EventItem, EventSource, ItemDetail } from '../api';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { courseIcon } from '../courseIcon';
 import { DetailSheet } from '../DetailSheet';
-import { eventView } from '../eventView';
-import { formatDate } from '../format';
+import { arrivedAt, eventRow, eventView, groupByDay, ListEntry, rowTime } from '../eventView';
 import { icons } from '../icons';
-import { Header, Notice, Panel, Refreshable, rounded, ShapeIcon, shapes } from '../ui';
+import { Choices, groupedShape, Header, Notice, Refreshable, rounded, ShapeIcon, shapes } from '../ui';
 import { useLoad } from '../useLoad';
 
 /** An event from an older server has no list of its own, so its key decides. */
@@ -40,21 +42,21 @@ function isUnread(event: EventItem): boolean {
 
 type Filter = 'all' | 'unread' | 'important' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder';
 
-const CANVAS_FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'Tümü' },
-  { id: 'unread', label: 'Okunmamış' },
-  { id: 'announcement', label: 'Duyuru' },
-  { id: 'work', label: 'Ödev' },
-  { id: 'exam', label: 'Sınav' },
-  { id: 'grade', label: 'Not' },
-  { id: 'message', label: 'Mesaj' },
-  { id: 'reminder', label: 'Hatırlatma' },
-];
-const MAIL_FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'Tümü' },
-  { id: 'unread', label: 'Okunmamış' },
-  { id: 'important', label: 'Önemli' },
-];
+const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
+  canvas: [
+    { id: 'unread', label: 'Okunmamış' },
+    { id: 'announcement', label: 'Duyuru' },
+    { id: 'work', label: 'Ödev' },
+    { id: 'exam', label: 'Sınav' },
+    { id: 'grade', label: 'Not' },
+    { id: 'message', label: 'Mesaj' },
+    { id: 'reminder', label: 'Hatırlatma' },
+  ],
+  mail: [
+    { id: 'unread', label: 'Okunmamış' },
+    { id: 'important', label: 'Önemli' },
+  ],
+};
 
 function matches(event: EventItem, filter: Filter): boolean {
   switch (filter) {
@@ -73,76 +75,80 @@ function matches(event: EventItem, filter: Filter): boolean {
   }
 }
 
-/** When it really arrived. New mail and announcements carry their own time; the watcher only saw them some minutes later. */
-function arrivedAt(event: EventItem): number {
-  const posted = event.type === 'new' ? event.current?.postedAt : null;
-  return Date.parse(posted ?? event.createdAt) || 0;
-}
-
 function iconFor(event: EventItem) {
-  if (event.type === 'exam') return icons.quiz;
+  if (event.type === 'exam') return courseIcon(event.current?.course ?? event.title.split(': ')[0]);
   if (event.type === 'reminder') return icons.schedule;
   if (event.type === 'graded') return icons.star;
   if (event.type === 'alert') return icons.error;
   if (event.itemKey.startsWith('mail:')) return icons.mail;
   if (event.itemKey.startsWith('announcement:')) return icons.campaign;
+  if (event.itemKey.startsWith('message:')) return icons.forum;
   return icons.assignment;
 }
 
-function EventRow({ item, now, onOpen }: { item: EventItem; now: number; onOpen: () => void }) {
+function EventCard({ item, now, shape, onOpen }: {
+  item: EventItem;
+  now: number;
+  shape: ReturnType<typeof groupedShape>;
+  onOpen: () => void;
+}) {
   const colors = useMaterialColors();
-  const view = eventView(item, now);
+  const view = eventRow(item, now);
+  const unread = isUnread(item);
   // A deadline that has passed or been handed in is history: it keeps its text but stops looking alarming.
   const critical = item.level === 'critical' && !view.over;
   const high = item.level === 'high' && !view.over;
   return (
-    <Panel onClick={onOpen}>
-      <Row horizontalArrangement={{ spacedBy: 16 }}>
+    <Surface color={unread ? colors.surfaceContainerHigh : colors.surfaceContainerLow} shape={shape} onClick={onOpen} modifiers={[fillMaxWidth()]}>
+      <Row modifiers={[paddingAll(14)]} horizontalArrangement={{ spacedBy: 12 }}>
         <ShapeIcon
           icon={iconFor(item)}
           shape={critical ? shapes.Boom : high ? shapes.Cookie7Sided : Shapes.Circle}
           container={critical ? colors.error : high ? colors.primaryContainer : colors.surfaceContainerHighest}
           content={critical ? colors.onError : high ? colors.onPrimaryContainer : colors.onSurfaceVariant}
-          dp={44}
+          dp={40}
         />
-        <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 4 }}>
-          <Row horizontalArrangement={{ spacedBy: 8 }} verticalAlignment="center">
-            {isUnread(item) ? <Surface color={colors.primary} shape={rounded(50)} modifiers={[height(10), width(10)]}><Box /></Surface> : null}
-            <Text
-              color={colors.onSurface}
-              modifiers={[weight(1)]}
-              style={{ typography: 'titleMedium', fontWeight: isUnread(item) ? '800' : '500' }}>
-              {view.title}
+        <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 2 }}>
+          <Row horizontalArrangement={{ spacedBy: 6 }} verticalAlignment="center">
+            {unread ? <Surface color={colors.primary} shape={rounded(50)} modifiers={[height(8), width(8)]}><Box /></Surface> : null}
+            <Text color={colors.primary} maxLines={1} overflow="ellipsis" modifiers={[weight(1)]} style={{ typography: 'labelMedium', fontWeight: '700' }}>
+              {view.label}
             </Text>
+            <Text color={colors.onSurfaceVariant} style={{ typography: 'labelSmall' }}>{rowTime(arrivedAt(item), now)}</Text>
           </Row>
+          <Text
+            color={unread ? colors.onSurface : colors.onSurfaceVariant}
+            maxLines={2}
+            overflow="ellipsis"
+            style={{ typography: 'titleSmall', fontWeight: unread ? '700' : '500' }}>
+            {view.headline}
+          </Text>
+          {view.preview ? (
+            <Text color={colors.onSurfaceVariant} maxLines={2} overflow="ellipsis" style={{ typography: 'bodySmall' }}>
+              {view.preview}
+            </Text>
+          ) : null}
           {view.status ? (
             <Text
               color={view.urgent ? colors.error : view.over ? colors.onSurfaceVariant : colors.primary}
-              style={{ typography: 'labelLarge', fontWeight: '700' }}>
+              style={{ typography: 'labelMedium', fontWeight: '700' }}>
               {view.status}
             </Text>
           ) : null}
-          {view.body ? (
-            <Text color={colors.onSurfaceVariant} maxLines={4} overflow="ellipsis" style={{ typography: 'bodyMedium' }}>
-              {view.body}
-            </Text>
-          ) : null}
-          <Text color={colors.outline} style={{ typography: 'labelMedium' }}>
-            {formatDate(item.createdAt)}
-          </Text>
         </Column>
       </Row>
-    </Panel>
+    </Surface>
   );
 }
 
 /**
- * Sliding a row only uncovers the delete page; deleting takes a tap on Sil as well, so neither a slip of the
- * thumb nor a quick flick can lose a notification. Slide back or tap Vazgeç to leave it.
+ * Sliding a row only uncovers its actions; deleting takes a tap on Sil as well, so neither a slip of the thumb nor a
+ * quick flick can lose a notification. Slide back to leave it.
  */
-function SwipeRow({ item, now, onOpen, onDelete, onToggleRead }: {
+function SwipeRow({ item, now, shape, onOpen, onDelete, onToggleRead }: {
   item: EventItem;
   now: number;
+  shape: ReturnType<typeof groupedShape>;
   onOpen: () => void;
   onDelete: () => void;
   onToggleRead: () => void;
@@ -151,39 +157,89 @@ function SwipeRow({ item, now, onOpen, onDelete, onToggleRead }: {
   const pager = useRef<HorizontalPagerHandle>(null);
   const [rowHeight, setRowHeight] = useState(0);
   return (
-    <HorizontalPager ref={pager} pageSpacing={12} modifiers={[fillMaxWidth()]}>
+    <HorizontalPager ref={pager} pageSpacing={8} modifiers={[fillMaxWidth()]}>
       <Box modifiers={[fillMaxWidth(), onSizeChanged((size) => setRowHeight(size.height))]}>
-        <EventRow item={item} now={now} onOpen={onOpen} />
+        <EventCard item={item} now={now} shape={shape} onOpen={onOpen} />
       </Box>
       <Surface
-        color={colors.errorContainer}
-        shape={rounded(28)}
+        color={colors.surfaceContainerHighest}
+        shape={shape}
         modifiers={rowHeight ? [fillMaxWidth(), height(rowHeight)] : [fillMaxWidth()]}>
-        <Row
-          modifiers={[fillMaxSize(), paddingAll(12)]}
-          horizontalArrangement={{ spacedBy: 8 }}
-          verticalAlignment="center">
-          <TextButton modifiers={[weight(1)]} onClick={() => void pager.current?.animateScrollToPage(0)}>
-            <Text color={colors.onErrorContainer}>Vazgeç</Text>
-          </TextButton>
-          <TextButton
-            modifiers={[weight(1.2)]}
+        <Row modifiers={[fillMaxSize(), paddingAll(10)]} horizontalArrangement={{ spacedBy: 8 }} verticalAlignment="center">
+          <FilledTonalButton
+            modifiers={[weight(1)]}
             onClick={() => {
               onToggleRead();
               void pager.current?.animateScrollToPage(0);
             }}>
-            <Text color={colors.onErrorContainer}>{isUnread(item) ? 'Okundu' : 'Okunmadı'}</Text>
-          </TextButton>
+            <Icon source={icons.doneAll} size={18} />
+            <Text modifiers={[padding(6, 0, 0, 0)]}>{isUnread(item) ? 'Okundu' : 'Okunmadı'}</Text>
+          </FilledTonalButton>
           <Button
             modifiers={[weight(1)]}
             colors={{ containerColor: colors.error, contentColor: colors.onError }}
             onClick={onDelete}>
             <Icon source={icons.delete} size={18} tint={colors.onError} />
-            <Text modifiers={[paddingAll(4)]} color={colors.onError}>Sil</Text>
+            <Text modifiers={[padding(6, 0, 0, 0)]} color={colors.onError}>Sil</Text>
           </Button>
         </Row>
       </Surface>
     </HorizontalPager>
+  );
+}
+
+const COURSE_CHIP_CHARS = 18;
+
+/** Courses as a menu rather than a row of their own: their names are long, and the list needs the room. */
+function CoursePicker({ courses, course, onChange }: {
+  courses: string[];
+  course: string | null;
+  onChange: (course: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const pick = (next: string | null) => {
+    setOpen(false);
+    onChange(next);
+  };
+  const name = course && course.length > COURSE_CHIP_CHARS ? `${course.slice(0, COURSE_CHIP_CHARS - 1).trimEnd()}…` : course;
+  return (
+    <DropdownMenu expanded={open} onDismissRequest={() => setOpen(false)}>
+      <DropdownMenu.Trigger>
+        <FilterChip selected={!!course} onClick={() => setOpen(true)}>
+          <FilterChip.Label>
+            <Text>{name ?? 'Ders'}</Text>
+          </FilterChip.Label>
+          <FilterChip.TrailingIcon>
+            <Icon source={icons.arrowDown} size={18} />
+          </FilterChip.TrailingIcon>
+        </FilterChip>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Items>
+        <DropdownMenuItem onClick={() => pick(null)}>
+          <DropdownMenuItem.LeadingIcon>
+            <Icon source={icons.school} size={20} />
+          </DropdownMenuItem.LeadingIcon>
+          <DropdownMenuItem.Text>
+            <Text>Tüm dersler</Text>
+          </DropdownMenuItem.Text>
+        </DropdownMenuItem>
+        {courses.map((option) => (
+          <DropdownMenuItem key={option} onClick={() => pick(option)}>
+            <DropdownMenuItem.LeadingIcon>
+              <Icon source={courseIcon(option)} size={20} />
+            </DropdownMenuItem.LeadingIcon>
+            <DropdownMenuItem.Text>
+              <Text>{option}</Text>
+            </DropdownMenuItem.Text>
+            {option === course ? (
+              <DropdownMenuItem.TrailingIcon>
+                <Icon source={icons.taskDone} size={20} />
+              </DropdownMenuItem.TrailingIcon>
+            ) : null}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenu.Items>
+    </DropdownMenu>
   );
 }
 
@@ -194,6 +250,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
   onOpened: () => void;
   onSolve?: (detail: ItemDetail) => void;
 }) {
+  const colors = useMaterialColors();
   const load = useCallback(() => api.events(connection), [connection]);
   const { data, setData, error, refreshing, refresh } = useLoad(load);
   const [open, setOpen] = useState<EventItem | null>(null);
@@ -202,6 +259,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
   const [list, setList] = useState<EventSource>('canvas');
   const [filter, setFilter] = useState<Filter>('all');
   const [course, setCourse] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
   // Counts down from the moment the list was read, and moves on with every refresh.
   const now = useMemo(() => Date.now(), [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -217,7 +275,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
   const remove = useCallback(
     async (event: EventItem) => {
       setActionError(null);
-      setData((list) => list?.filter((other) => other.id !== event.id) ?? list);
+      setData((events) => events?.filter((other) => other.id !== event.id) ?? events);
       try {
         await api.deleteEvent(connection, event.id);
       } catch (reason) {
@@ -259,24 +317,13 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
     }
   }, [connection, list, refresh, setData]);
 
-  const renderRow = useCallback(
-    ({ item }: { item: EventItem }) => (
-      <SwipeRow
-        item={item}
-        now={now}
-        onOpen={() => openEvent(item)}
-        onDelete={() => void remove(item)}
-        onToggleRead={() => void setRead(item, isUnread(item))}
-      />
-    ),
-    [now, openEvent, remove, setRead],
-  );
-
   useEffect(() => {
     if (openEventId === null || !data) return;
     const tapped = data.find((event) => event.id === openEventId);
     if (tapped) {
       setList(sourceOf(tapped));
+      setFilter('all');
+      setCourse(null);
       openEvent(tapped);
     }
     onOpened();
@@ -284,93 +331,139 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
 
   const shown = open ? eventView(open, now) : null;
   const unreadIn = (source: EventSource) => data?.filter((event) => sourceOf(event) === source && isUnread(event)).length ?? 0;
-  const label = (name: string, source: EventSource) => (unreadIn(source) ? `${name} (${unreadIn(source)})` : name);
   const inList = useMemo(() => data?.filter((event) => sourceOf(event) === list) ?? [], [data, list]);
+  const ofCourse = useMemo(() => inList.filter((event) => !course || event.current?.course === course), [course, inList]);
   const visible = useMemo(
-    () => inList
-      .filter((event) => matches(event, filter) && (!course || event.current?.course === course))
-      .sort((a, b) => arrivedAt(b) - arrivedAt(a) || b.id - a.id),
-    [course, filter, inList],
+    () => ofCourse.filter((event) => matches(event, filter)).sort((a, b) => arrivedAt(b) - arrivedAt(a) || b.id - a.id),
+    [filter, ofCourse],
   );
-  const filters = (list === 'canvas' ? CANVAS_FILTERS : MAIL_FILTERS).filter(
-    (option) => option.id === 'all' || option.id === 'unread' || option.id === filter || inList.some((event) => matches(event, option.id)),
-  );
+  const entries = useMemo(() => groupByDay(visible, now), [now, visible]);
+  const chips = FILTERS[list]
+    .map((option) => ({ ...option, count: ofCourse.filter((event) => matches(event, option.id)).length }))
+    .filter((option) => option.count > 0 || option.id === filter);
   const courses = useMemo(
     () => (list === 'canvas' ? [...new Set(inList.map((event) => event.current?.course).filter((name): name is string => !!name))].sort() : []),
     [inList, list],
   );
+  // Reminders stay out of this: the list does not show them unless asked, and nothing should go that was not on screen.
+  const readOnes = inList.filter((event) => event.read === true && event.type !== 'reminder');
+
+  const clearRead = async () => {
+    setClearing(false);
+    setActionError(null);
+    const doomed = new Set(readOnes.map((event) => event.id));
+    setData((events) => events?.filter((event) => !doomed.has(event.id)) ?? events);
+    try {
+      for (const id of doomed) await api.deleteEvent(connection, id);
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : 'Bildirimler silinemedi.');
+      void refresh();
+    }
+  };
+
   const switchList = (next: EventSource) => {
     setList(next);
     setFilter('all');
     setCourse(null);
   };
+
+  const renderEntry = useCallback(
+    ({ item }: { item: ListEntry }) => (item.kind === 'head' ? (
+      <Text
+        color={colors.onSurfaceVariant}
+        modifiers={[padding(6, item.key === entries[0]?.key ? 0 : 12, 0, 4)]}
+        style={{ typography: 'labelLarge', fontWeight: '700' }}>
+        {item.label}
+      </Text>
+    ) : (
+      <SwipeRow
+        item={item.event}
+        now={now}
+        shape={groupedShape(item.first, item.last)}
+        onOpen={() => openEvent(item.event)}
+        onDelete={() => void remove(item.event)}
+        onToggleRead={() => void setRead(item.event, isUnread(item.event))}
+      />
+    )),
+    [colors, entries, now, openEvent, remove, setRead],
+  );
+
   return (
     <Refreshable refreshing={refreshing} onRefresh={pull}>
-      {/* A new newest or another filter starts again from the top: what just arrived is what this page is for. */}
-      <LazyColumn
-        key={`${list}-${filter}-${course}-${visible[0]?.id ?? 0}`}
-        modifiers={[fillMaxSize()]}
-        contentPadding={{ start: 16, end: 16, bottom: 24 }}
-        verticalArrangement={{ spacedBy: 10 }}>
-        <Header title="Bildirimler" subtitle={connection.mode === 'phone' ? 'Yeni ödevler, tarih değişiklikleri, notlar ve duyurular' : 'Yeni ödevler, tarih değişiklikleri, notlar ve önemli mailler'} />
-        {error ? <Notice tone="error">{error}</Notice> : null}
-        {actionError ? <Notice tone="error">{actionError}</Notice> : null}
-        {stale && !error ? <Notice>Şu an yeni kontrol yapılamadı, liste son kontrolün sonucunu gösteriyor.</Notice> : null}
-        {!data && !error ? (
-          <Row modifiers={[fillMaxWidth(), paddingAll(32)]} horizontalArrangement="center">
-            <LoadingIndicator />
-          </Row>
-        ) : null}
-        <SingleChoiceSegmentedButtonRow modifiers={[fillMaxWidth()]}>
-          <SegmentedButton selected={list === 'canvas'} onClick={() => switchList('canvas')}>
-            <SegmentedButton.Label>
-              <Text>{label('Canvas', 'canvas')}</Text>
-            </SegmentedButton.Label>
-          </SegmentedButton>
-          <SegmentedButton selected={list === 'mail'} onClick={() => switchList('mail')}>
-            <SegmentedButton.Label>
-              <Text>{label('E-posta', 'mail')}</Text>
-            </SegmentedButton.Label>
-          </SegmentedButton>
-        </SingleChoiceSegmentedButtonRow>
-        <LazyRow modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 8 }}>
-          {filters.map((option) => (
-            <FilterChip key={option.id} selected={filter === option.id} onClick={() => setFilter(option.id)}>
+      <Column modifiers={[fillMaxSize()]}>
+        {/* Fixed above the list: always in reach, and not re-created when the list below it starts again from the top. */}
+        <Column modifiers={[fillMaxWidth(), padding(16, 0, 16, 10)]} verticalArrangement={{ spacedBy: 10 }}>
+          <Header
+            title="Bildirimler"
+            actions={(
+              <>
+                {unreadIn(list) ? (
+                  <IconButton onClick={() => void markAllRead()}>
+                    <Icon source={icons.doneAll} size={24} tint={colors.onSurfaceVariant} contentDescription="Tümünü okundu say" />
+                  </IconButton>
+                ) : null}
+                {readOnes.length ? (
+                  <IconButton onClick={() => setClearing(true)}>
+                    <Icon source={icons.deleteAll} size={24} tint={colors.onSurfaceVariant} contentDescription="Okunmuşları sil" />
+                  </IconButton>
+                ) : null}
+              </>
+            )}
+          />
+          <Choices
+            value={list}
+            onChange={switchList}
+            options={[
+              { value: 'canvas', label: 'Canvas', count: unreadIn('canvas') },
+              { value: 'mail', label: 'E-posta', count: unreadIn('mail') },
+            ]}
+          />
+        </Column>
+        <LazyRow modifiers={[fillMaxWidth()]} contentPadding={{ start: 16, end: 16 }} horizontalArrangement={{ spacedBy: 8 }}>
+          {courses.length > 1 ? <CoursePicker courses={courses} course={course} onChange={setCourse} /> : null}
+          {chips.map((option) => (
+            <FilterChip key={option.id} selected={filter === option.id} onClick={() => setFilter(filter === option.id ? 'all' : option.id)}>
               <FilterChip.Label>
-                <Text>{option.label}</Text>
+                <Text>{`${option.label} ${option.count}`}</Text>
               </FilterChip.Label>
             </FilterChip>
           ))}
         </LazyRow>
-        {courses.length > 1 ? (
-          <LazyRow modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 8 }}>
-            {courses.map((name) => (
-              <FilterChip key={name} selected={course === name} onClick={() => setCourse(course === name ? null : name)}>
-                <FilterChip.Label>
-                  <Text>{name}</Text>
-                </FilterChip.Label>
-              </FilterChip>
-            ))}
-          </LazyRow>
-        ) : null}
-        {unreadIn(list) ? (
-          <Row modifiers={[fillMaxWidth()]} horizontalArrangement="end">
-            <TextButton onClick={() => void markAllRead()}>
-              <Text>Tümünü okundu say</Text>
-            </TextButton>
-          </Row>
-        ) : null}
-        {data && visible.length === 0 ? (
-          <Notice>
-            {filter !== 'all' || course
-              ? 'Bu filtreye uyan bildirim yok.'
-              : `${list === 'mail' ? 'Henüz mail bildirimi yok.' : 'Henüz Canvas bildirimi yok.'} Yeni bir şey olunca burada ve telefonunun bildirimlerinde görünecek.`}
-          </Notice>
-        ) : null}
-        <LazyColumn.Items data={visible} keyExtractor={(item) => String(item.id)} estimatedItemSize={100}>
-          {renderRow}
-        </LazyColumn.Items>
-      </LazyColumn>
+        {/* A new newest or another filter starts again from the top: what just arrived is what this page is for. */}
+        <LazyColumn
+          key={`${list}-${filter}-${course}-${visible[0]?.id ?? 0}`}
+          modifiers={[fillMaxWidth(), weight(1)]}
+          contentPadding={{ start: 16, end: 16, top: 6, bottom: 24 }}
+          verticalArrangement={{ spacedBy: 3 }}>
+          {error ? <Notice tone="error">{error}</Notice> : null}
+          {actionError ? <Notice tone="error">{actionError}</Notice> : null}
+          {stale && !error ? <Notice>Şu an yeni kontrol yapılamadı, liste son kontrolün sonucunu gösteriyor.</Notice> : null}
+          {!data && !error ? (
+            <Row modifiers={[fillMaxWidth(), paddingAll(32)]} horizontalArrangement="center">
+              <LoadingIndicator />
+            </Row>
+          ) : null}
+          {data && visible.length === 0 ? (
+            <Notice>
+              {filter !== 'all' || course
+                ? 'Bu filtreye uyan bildirim yok.'
+                : `${list === 'mail' ? 'Henüz mail bildirimi yok.' : 'Henüz Canvas bildirimi yok.'} Yeni bir şey olunca burada ve telefonunun bildirimlerinde görünecek.`}
+            </Notice>
+          ) : null}
+          <LazyColumn.Items data={entries} keyExtractor={(entry) => entry.key} estimatedItemSize={92}>
+            {renderEntry}
+          </LazyColumn.Items>
+        </LazyColumn>
+      </Column>
+      {clearing ? (
+        <ConfirmDialog
+          title="Okunmuşlar silinsin mi?"
+          text={`${list === 'mail' ? 'E-posta' : 'Canvas'} listesindeki okunmuş ${readOnes.length} bildirim silinecek. Canvas'a ve mail kutuna bir şey olmaz.`}
+          confirm="Sil"
+          onConfirm={() => void clearRead()}
+          onCancel={() => setClearing(false)}
+        />
+      ) : null}
       {open ? (
         <DetailSheet
           connection={connection}

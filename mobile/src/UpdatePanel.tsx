@@ -1,14 +1,34 @@
-import { Button, FilledTonalButton, LoadingIndicator, Row, Text, useMaterialColors } from '@expo/ui/jetpack-compose';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  Button,
+  FilledTonalButton,
+  LinearWavyProgressIndicator,
+  LoadingIndicator,
+  Row,
+  Text,
+  TextButton,
+  useMaterialColors,
+} from '@expo/ui/jetpack-compose';
+import { fillMaxWidth } from '@expo/ui/jetpack-compose/modifiers';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { Connection, Release } from './api';
 import { icons } from './icons';
 import { Notice, Panel, ShapeIcon, shapes } from './ui';
-import { findUpdate, installedVersion, installUpdate } from './update';
+import { cancelUpdate, findUpdate, installedVersion, installUpdate, UpdateStage, updateStage } from './update';
+
+function stageText(stage: UpdateStage): string {
+  switch (stage.kind) {
+    case 'downloading': return stage.fraction === null ? 'İndiriliyor…' : `İndiriliyor… %${Math.round(stage.fraction * 100)}`;
+    case 'checking': return 'Dosya kontrol ediliyor…';
+    case 'installing': return 'Kurulum ekranı açıldı.';
+    case 'idle': return '';
+  }
+}
 
 /** Checks for a newer app on mount. `onlyWhenAvailable` hides it until there is something to install. */
 export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Connection | null; onlyWhenAvailable?: boolean }) {
   const colors = useMaterialColors();
+  const stage = useSyncExternalStore(updateStage.subscribe, updateStage.get);
   const [release, setRelease] = useState<Release | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,18 +57,17 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
   const install = async () => {
     if (!release) return;
     setError(null);
-    setBusy(true);
     try {
       await installUpdate(connection, release);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Güncelleme kurulamadı.');
-    } finally {
-      setBusy(false);
     }
   };
 
   if (onlyWhenAvailable && !release) return null;
 
+  const working = stage.kind !== 'idle';
+  const onColor = release ? colors.onTertiaryContainer : colors.onSurfaceVariant;
   return (
     <Panel color={release ? colors.tertiaryContainer : undefined}>
       <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
@@ -65,24 +84,39 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
           {release ? 'Yeni sürüm hazır' : 'Uygulama'}
         </Text>
       </Row>
-      <Text color={release ? colors.onTertiaryContainer : colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+      <Text color={onColor} style={{ typography: 'bodyMedium' }}>
         {release
           ? `Kurulu: ${installed.name} (${installed.code}). Yeni: ${release.versionName} (${release.versionCode}).`
           : `Sürüm ${installed.name} (${installed.code}).${upToDate ? ' Bu en son sürüm.' : ''}`}
       </Text>
-      <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
-        {release ? (
-          <Button enabled={!busy} onClick={() => void install()}>
-            <Text>{busy ? 'İndiriliyor…' : 'Güncelle'}</Text>
-          </Button>
-        ) : (
-          <FilledTonalButton enabled={!busy} onClick={() => void check()}>
-            <Text>{busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}</Text>
-          </FilledTonalButton>
-        )}
-        {busy ? <LoadingIndicator /> : null}
-      </Row>
+      {/* Above the buttons: this panel is often the last thing on the screen, and what follows it can end up out of sight. */}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {working ? (
+        <>
+          <Text color={onColor} style={{ typography: 'labelLarge', fontWeight: '700' }}>{stageText(stage)}</Text>
+          {stage.kind === 'downloading' ? (
+            <LinearWavyProgressIndicator progress={stage.fraction} modifiers={[fillMaxWidth()]} />
+          ) : null}
+          {stage.kind === 'downloading' && stage.cancellable ? (
+            <TextButton onClick={cancelUpdate}>
+              <Text>İptal</Text>
+            </TextButton>
+          ) : null}
+        </>
+      ) : (
+        <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+          {release ? (
+            <Button onClick={() => void install()}>
+              <Text>Güncelle</Text>
+            </Button>
+          ) : (
+            <FilledTonalButton enabled={!busy} onClick={() => void check()}>
+              <Text>{busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}</Text>
+            </FilledTonalButton>
+          )}
+          {busy ? <LoadingIndicator /> : null}
+        </Row>
+      )}
     </Panel>
   );
 }
