@@ -72,10 +72,11 @@ def test_gemini_notes_say_approximate_or_point_to_ai_studio():
         {"name": "models/gemini-9.9-flash", "supportedGenerationMethods": ["generateContent"]},
         {"name": "models/gemini-3.8-flash-tts", "supportedGenerationMethods": ["generateContent"]},
         {"name": "models/old", "supportedGenerationMethods": ["embedContent"]},
+        {"name": "models/lyria-3-pro-preview", "supportedGenerationMethods": ["generateContent"]},
     ]
     options = {o["id"]: o["note"] for o in gemini_options(models)}
     assert list(options) == ["gemini-9.9-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"]
-    assert options["gemini-3.5-flash-lite"] == "yaklaşık 10 istek/dk, 500/gün · 1M bağlam"
+    assert options["gemini-3.5-flash-lite"] == "yaklaşık 10 istek/dk, 1500/gün · 1M bağlam"
     assert options["gemini-3.8-flash"].startswith("yaklaşık 5 istek/dk")
     assert options["gemini-9.9-flash"] == "Limit: AI Studio’da"
 

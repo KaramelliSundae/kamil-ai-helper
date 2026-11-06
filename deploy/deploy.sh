@@ -11,7 +11,7 @@ ssh "$host" sudo install -d -m 755 /opt/ai-ders
 rsync -rlt --delete --rsync-path="sudo rsync" \
   --exclude .git --exclude .venv --exclude python --exclude .uv-cache --exclude __pycache__ \
   --exclude .pytest_cache --exclude .state --exclude tests --exclude mobile --exclude benchmarks \
-  --exclude .DS_Store --exclude 'client_secret*.json' --exclude .host \
+  --exclude .DS_Store --exclude 'client_secret*.json' --exclude '/PRIVATE*' --exclude .host \
   "$here/" "$host:/opt/ai-ders/"
 # -t: the installer may ask for the API address, and sudo for a password.
 ssh -t "$host" sudo bash /opt/ai-ders/deploy/linux/install.sh

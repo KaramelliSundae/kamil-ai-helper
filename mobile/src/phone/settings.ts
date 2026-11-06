@@ -107,8 +107,8 @@ export async function clearPhoneSettings(): Promise<void> {
   await Promise.all(Object.values(KEYS).map((key) => SecureStore.deleteItemAsync(key)));
 }
 
-/** "canvas.uni.edu" for "https://canvas.uni.edu/", or "" when the address is not a usable https URL. */
+/** "canvas.uni.edu" for "canvas.uni.edu" or "https://canvas.uni.edu/". "" when it is not a plain host, or asks for plain http. */
 export function canvasHost(url: string): string {
-  const match = url.trim().match(/^https:\/\/([^/?#:@]+)(?::\d+)?\/?$/i);
+  const match = url.trim().match(/^(?:https:\/\/)?([^/?#:@\s]+\.[^/?#:@\s]+)(?::\d+)?\/?$/i);
   return match ? match[1].toLowerCase() : '';
 }

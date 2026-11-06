@@ -57,7 +57,7 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 FREE_PER_MINUTE = 20  # OpenRouter's documented limit for free models; it does not report it per key
 # Google publishes no per-model free limits, only a signed-in page per project. These two come from a third-party guide,
 # so they are shown as approximate.
-GEMINI_APPROX = ((r"3\.8-flash(?!-lite)", "yaklaşık 5 istek/dk, 20/gün"), (r"3\.5-flash-lite", "yaklaşık 10 istek/dk, 500/gün"))
+GEMINI_APPROX = ((r"3\.8-flash(?!-lite)", "yaklaşık 5 istek/dk, 20/gün"), (r"3\.5-flash-lite", "yaklaşık 10 istek/dk, 1500/gün"))
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_SECONDS = 120.0
@@ -156,7 +156,7 @@ def gemini_options(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         name = model.get("name", "").removeprefix("models/")
         if "generateContent" not in (model.get("supportedGenerationMethods") or []):
             continue
-        if not re.search(r"flash|pro", name) or re.search(r"tts|image|live|audio|embedding", name):
+        if not name.startswith("gemini-") or not re.search(r"flash|pro", name) or re.search(r"tts|image|live|audio|embedding", name):
             continue
         limit = next((text for pattern, text in GEMINI_APPROX if re.search(pattern, name)), "Limit: AI Studio’da")
         options[name] = {"id": name, "note": " · ".join(part for part in (limit, _context(model.get("inputTokenLimit"))) if part), "free": False}

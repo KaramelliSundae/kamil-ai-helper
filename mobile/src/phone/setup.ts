@@ -21,7 +21,7 @@ function schoolDomainOf(email: string, host: string): string {
 
 export async function connectPhone(input: Omit<PhoneSettings, 'syllabusCheckDays'>): Promise<SetupResult> {
   const host = canvasHost(input.canvasUrl);
-  if (!host) throw new Error("Canvas adresini https:// ile ve yalnızca alan adıyla yaz, örneğin https://canvas.okulun.edu");
+  if (!host) throw new Error("Canvas adresini yalnızca alan adıyla yaz, örneğin canvas.okulun.edu");
   const canvasUrl = `https://${host}`;
   const canvasToken = input.canvasToken.trim();
   let who: { name: string; email: string };

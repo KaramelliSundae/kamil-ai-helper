@@ -22,7 +22,7 @@ const FREE_PER_MINUTE = 20; // OpenRouter's documented limit for free models; it
 // so they are shown as approximate, and whatever Google itself answers with a 429 replaces them.
 const GEMINI_APPROX: [RegExp, string][] = [
   [/3\.8-flash(?!-lite)/, 'yaklaşık 5 istek/dk, 20/gün'],
-  [/3\.5-flash-lite/, 'yaklaşık 10 istek/dk, 500/gün'],
+  [/3\.5-flash-lite/, 'yaklaşık 10 istek/dk, 1500/gün'],
 ];
 
 /** Plain http only to a machine of your own: a key must not cross the internet in the clear. */
@@ -95,7 +95,7 @@ export function geminiOptions(models: { name?: string; supportedGenerationMethod
   for (const model of models) {
     const id = String(model.name ?? '').replace(/^models\//, '');
     if (!(model.supportedGenerationMethods ?? []).includes('generateContent')) continue;
-    if (!/flash|pro/.test(id) || /tts|image|live|audio|embedding/.test(id)) continue;
+    if (!id.startsWith('gemini-') || !/flash|pro/.test(id) || /tts|image|live|audio|embedding/.test(id)) continue;
     const limit = seen[id] ? `Sınırın: ${seen[id]}` : GEMINI_APPROX.find(([pattern]) => pattern.test(id))?.[1] ?? 'Limit: AI Studio’da';
     options.set(id, { id, note: [limit, contextNote(model.inputTokenLimit)].filter(Boolean).join(' · '), free: false });
   }
