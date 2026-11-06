@@ -1,4 +1,5 @@
 import {
+  Button,
   Column,
   FilledTonalButton,
   FilledTonalIconButton,
@@ -9,6 +10,7 @@ import {
   Row,
   Surface,
   Text,
+  TextButton,
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, padding, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
@@ -233,6 +235,16 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
     }
   };
 
+  const answerOutdated = async (key: string, update: boolean) => {
+    setTaskError(null);
+    try {
+      await (update ? api.updateTask(connection, key) : api.keepTask(connection, key));
+      void refresh();
+    } catch (reason) {
+      setTaskError(reason instanceof Error ? reason.message : "Google Tasks'a ulaşılamadı.");
+    }
+  };
+
   const exams = useMemo(() => examOrder(data?.exams ?? [], Date.now()), [data]);
   const missing = data?.examsMissing ?? [];
   const renderExam = useCallback(
@@ -273,6 +285,24 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
         <TodayKamil connection={connection} gpu={data?.gpu} upcoming={data?.upcoming} onUpdated={refresh} guest={guest} />
         {data ? <Summary upcoming={data.upcoming} gpu={data.gpu} now={now} /> : null}
         <UpdatePanel connection={connection} onlyWhenAvailable />
+        {(data?.tasksOutdated ?? []).map((task) => (
+          <Panel key={task.key} color={colors.tertiaryContainer}>
+            <Text color={colors.onTertiaryContainer} style={{ typography: 'titleMedium', fontWeight: '700' }}>
+              Tarih değişmiş, Tasks'ta güncelleyeyim mi?
+            </Text>
+            <Text color={colors.onTertiaryContainer} style={{ typography: 'bodyMedium' }}>
+              {`${task.title}: ${shortDay(task.from)} → ${shortDay(task.to)}`}
+            </Text>
+            <Row horizontalArrangement={{ spacedBy: 8 }} verticalAlignment="center">
+              <Button onClick={() => void answerOutdated(task.key, true)}>
+                <Text>Güncelle</Text>
+              </Button>
+              <TextButton onClick={() => void answerOutdated(task.key, false)}>
+                <Text>Eski kalsın</Text>
+              </TextButton>
+            </Row>
+          </Panel>
+        ))}
         {connection.mode === 'server' && data && sharesGpu(data.gpu) ? <ServerStatus connection={connection} /> : null}
         {!data && !error ? (
           <Row modifiers={[fillMaxWidth(), paddingAll(32)]} horizontalArrangement="center">

@@ -36,6 +36,7 @@ CONVERSATION_LIMIT = 100
 MESSAGE_LIMIT = 200
 PLACEHOLDER = re.compile(r"\[[^\]\n]{2,60}\]")  # for example [Adın Soyadın]
 GPU_MODES = ("assistant", "compute", "auto", "image")  # the last two: what apps not yet updated still send
+TASK_DUE = "gtask_due:"  # the day a task was added for, to notice when its item or exam moves
 GEMINI_FILE = "gemini.json"  # a key entered in the app, with the model and the mail choice
 APK_TYPE = "application/vnd.android.package-archive"
 IMAGE_ID = re.compile(r"[0-9a-f]{64}")
@@ -116,6 +117,16 @@ def exam_json(row: Any) -> dict[str, Any]:
         "number": row["number"], "startsOn": row["starts_on"], "endsOn": row["ends_on"], "status": row["status"],
         "week": row["week"], "source": row["source"], "evidence": row["evidence"], "url": row["url"],
     }
+
+
+def exam_task(exam: Any) -> tuple[str, str]:
+    """An exam's course and date say it all, so no model is involved."""
+    name = "Vize" if exam["kind"] == "midterm" else "Final"
+    name += f" {exam['number']}" if exam["number"] else ""
+    guessed = exam["status"] == "estimated"
+    week = f"Tahmini tarih: {exam['week']}. hafta. Kesinleşince kontrol et." if guessed else ""
+    title = f"{exam['course']}: {name}{' (tahmini)' if guessed else ''}"
+    return title, "\n".join(part for part in (week, exam["url"]) if part)
 
 
 def draft_json(row: Any) -> dict[str, Any]:
@@ -233,6 +244,7 @@ def create_app(
         return {
             "upcoming": upcoming, "pendingDrafts": len(store.pending_drafts()), "gpu": gpu_state(),
             "tasksEnabled": tasks is not None, "exams": coming, "examsMissing": missing,
+            "tasksOutdated": outdated_tasks(store) if tasks is not None else [],
         }
 
     @app.get("/v1/settings/syllabus-check", dependencies=guarded)
@@ -259,13 +271,7 @@ def create_app(
         if store.get_meta(marker):
             return {"status": "exists"}
         if exam:
-            # An exam has no text to summarise: its course and date say it all, so no model is involved.
-            name = "Vize" if exam["kind"] == "midterm" else "Final"
-            name += f" {exam['number']}" if exam["number"] else ""
-            guessed = exam["status"] == "estimated"
-            title = f"{exam['course']}: {name}{' (tahmini)' if guessed else ''}"
-            week = f"Tahmini tarih: {exam['week']}. hafta. Kesinleşince kontrol et." if guessed else ""
-            notes = "\n".join(part for part in (week, exam["url"]) if part)
+            title, notes = exam_task(exam)
             day = date.fromisoformat(exam["starts_on"])
         else:
             due = to_time(row["due_at"])
@@ -285,7 +291,66 @@ def create_app(
         except httpx.HTTPError as error:
             raise HTTPException(502, "Google Tasks'a ulaşılamadı") from error
         store.set_meta(marker, task_id)
+        # A day the student chose is theirs: only a day taken from the item or the exam can later go out of date.
+        if day and request.due is None:
+            store.set_meta(f"{TASK_DUE}{request.key}", day.isoformat())
         return {"status": "added"}
+
+    def task_source(store: Store, key: str) -> tuple[date | None, str, Any]:
+        """The day an added task should have now, its name, and the exam behind it if there is one."""
+        exam = next((r for r in store.exams() if exam_json(r)["key"] == key), None)
+        if exam:
+            return date.fromisoformat(exam["starts_on"]), exam_task(exam)[0], exam
+        row = store.get_item(key)
+        if row is None:
+            return None, "", None
+        due = to_time(row["due_at"])
+        name = f"{row['course']}: {row['title']}" if row["course"] else row["title"]
+        return (due.astimezone(settings.timezone).date() if due else None), name, None
+
+    def outdated_tasks(store: Store) -> list[dict[str, str]]:
+        today_here = datetime.now(UTC).astimezone(settings.timezone).date()
+        found = []
+        for meta, added_for in store.metas(TASK_DUE):
+            key = meta.removeprefix(TASK_DUE)
+            current, name, _ = task_source(store, key)
+            if current and current >= today_here and current.isoformat() != added_for and store.get_meta(f"gtask:{key}"):
+                found.append({"key": key, "title": name, "from": added_for, "to": current.isoformat()})
+        return found
+
+    @app.post("/v1/tasks/update", dependencies=guarded)
+    def update_task(request: TaskKey, store: Db) -> dict[str, str]:
+        """Only when the student says so. Moves the task to the day the item or exam has now."""
+        if tasks is None:
+            raise HTTPException(409, "Google Tasks bağlı değil")
+        marker = f"gtask:{request.key}"
+        task_id = store.get_meta(marker)
+        current, _, exam = task_source(store, request.key)
+        if not task_id or current is None:
+            raise HTTPException(404, "görev bulunamadı")
+        # An exam's name can change with its date ("tahmini" goes away). An item keeps the wording the student chose.
+        title, notes = exam_task(exam) if exam else (None, None)
+        try:
+            alive = tasks.update(task_id, current, title, notes)
+        except GoogleTasksError as error:
+            raise HTTPException(502, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(502, "Google Tasks'a ulaşılamadı") from error
+        if not alive:
+            store.delete_meta(marker)
+            store.delete_meta(f"{TASK_DUE}{request.key}")
+            return {"status": "gone"}
+        store.set_meta(f"{TASK_DUE}{request.key}", current.isoformat())
+        return {"status": "updated"}
+
+    @app.post("/v1/tasks/keep", dependencies=guarded)
+    def keep_task(request: TaskKey, store: Db) -> dict[str, str]:
+        """The student said leave it: asks again only if the date changes once more."""
+        current, _, _ = task_source(store, request.key)
+        if current is None or not store.get_meta(f"gtask:{request.key}"):
+            raise HTTPException(404, "görev bulunamadı")
+        store.set_meta(f"{TASK_DUE}{request.key}", current.isoformat())
+        return {"status": "kept"}
 
     @app.post("/v1/tasks/suggest", dependencies=guarded)
     def suggest_task(request: TaskKey, store: Db) -> dict[str, Any]:
@@ -325,6 +390,7 @@ def create_app(
         except httpx.HTTPError as error:
             raise HTTPException(502, "Google Tasks'a ulaşılamadı") from error
         store.delete_meta(marker)
+        store.delete_meta(f"{TASK_DUE}{request.key}")
         return {"status": "removed"}
 
     @app.get("/v1/events", dependencies=guarded)

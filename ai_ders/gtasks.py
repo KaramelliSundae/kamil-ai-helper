@@ -68,6 +68,21 @@ class GoogleTasks:
         return response.json()["id"]
 
 
+    def update(self, task_id: str, due: date, title: str | None = None, notes: str | None = None) -> bool:
+        """Moves a task to another day. False when it is gone from Google Tasks (deleted by hand)."""
+        task: dict[str, str] = {"due": f"{due.isoformat()}T00:00:00.000Z"}
+        if title is not None:
+            task["title"] = title
+        if notes is not None:
+            task["notes"] = notes
+        response = self.client.patch(
+            f"{TASKS_URL}/{quote(task_id, safe='')}", json=task, headers={"Authorization": f"Bearer {self._access_token()}"}
+        )
+        if response.status_code in (404, 410):
+            return False
+        response.raise_for_status()
+        return True
+
     def remove(self, task_id: str) -> None:
         """Already gone from Google Tasks (deleted by hand) counts as removed."""
         response = self.client.delete(

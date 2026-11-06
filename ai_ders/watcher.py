@@ -28,6 +28,7 @@ PLANNER_DAYS = 60
 MAIL_HISTORY_DAYS = 14  # read quietly on the first run
 FAILURES_BEFORE_ALERT = 6  # one hour at the 10 minute timer
 PREVIEW_CHARS = 280
+TASK_MOVED = "Google Tasks'taki görev eski tarihte. Bugün ekranından güncelleyebilirsin."
 KIND_LABELS = {
     "assignment": "Yeni ödev",
     "quiz": "Yeni quiz",
@@ -77,6 +78,8 @@ def record_change(store: Store, settings: Settings, item: Item, change: Change, 
         new = format_time(settings, item.due_at) if item.due_at else "kaldırıldı"
         title = f"Tarih değişti: {label(item)}"
         details = f"Eski: {old}\nYeni: {new}"
+        if store.get_meta(f"gtask:{item.key}"):
+            details += f"\n{TASK_MOVED}"
     elif change.type == "graded":
         level = HIGH
         title = f"Not girildi: {label(item)}"
@@ -123,11 +126,14 @@ def record_exams(store: Store, settings: Settings, course: str, found: list[exam
     events = 0
     for item in found:
         change = store.put_exam(course, item, exams.TRUST, now)
-        if change and not quiet and item.status == exams.ANNOUNCED:
+        key = f"exam:{course}:{item.kind}:{item.number}"
+        in_tasks = store.get_meta(f"gtask:{key}") is not None
+        # Any date is worth a word once it is in the student's Tasks, however unsure it is.
+        if change and not quiet and (item.status == exams.ANNOUNCED or in_tasks):
             day = item.starts_on.strftime("%d.%m.%Y")
-            verb = "tarihi değişti" if change == "moved" else "tarihi açıklandı"
-            key = f"exam:{course}:{item.kind}:{item.number}"
-            store.add_event(key, "exam", HIGH, f"{course}: {_exam_name(item)} {verb}", f"Tarih: {day}\n{item.evidence}", item.url, now)
+            verb = "tarihi değişti" if change == "moved" or item.status != exams.ANNOUNCED else "tarihi açıklandı"
+            note = f"\n{TASK_MOVED}" if in_tasks else ""
+            store.add_event(key, "exam", HIGH, f"{course}: {_exam_name(item)} {verb}", f"Tarih: {day}{note}\n{item.evidence}", item.url, now)
             events += 1
     return events
 

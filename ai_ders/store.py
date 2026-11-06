@@ -244,6 +244,10 @@ class Store:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
+    def metas(self, prefix: str) -> list[tuple[str, str]]:
+        rows = self.db.execute("SELECT key, value FROM meta WHERE key LIKE ? ESCAPE '\\'", (prefix.replace("_", "\\_") + "%",))
+        return [(row["key"], row["value"]) for row in rows.fetchall()]
+
     def delete_meta(self, key: str) -> None:
         self.db.execute("DELETE FROM meta WHERE key = ?", (key,))
         self.db.commit()

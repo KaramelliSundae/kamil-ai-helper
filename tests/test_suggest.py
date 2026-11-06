@@ -88,6 +88,8 @@ def setup(api_settings, sends):
     class Tasks:
         def __init__(self):
             self.added = []
+            self.updates = []
+            self.gone = False
 
         def add(self, title, notes, due):
             self.added.append((title, notes, due))
@@ -95,6 +97,10 @@ def setup(api_settings, sends):
 
         def remove(self, task_id):
             pass
+
+        def update(self, task_id, due, title=None, notes=None):
+            self.updates.append((task_id, due, title, notes))
+            return not self.gone
 
     with closing(Store(api_settings.db_path)) as db:
         now = datetime.now(UTC)
@@ -190,3 +196,113 @@ def test_an_unknown_exam_is_404(setup):
     client, tasks, _ = setup
     assert client.post("/v1/tasks", json={"key": "exam:YOK:final:0"}, headers=AUTH).status_code == 404
     assert tasks.added == []
+
+
+def move_exam(api_settings, course, days, status="announced"):
+    with closing(Store(api_settings.db_path)) as db:
+        db.db.execute("UPDATE exams SET starts_on = ?, status = ? WHERE course = ?", ((date.today() + timedelta(days=days)).isoformat(), status, course))
+        db.db.commit()
+
+
+def outdated(client):
+    return client.get("/v1/today", headers=AUTH).json()["tasksOutdated"]
+
+
+def add_exam(client, course):
+    key = {e["course"]: e for e in client.get("/v1/today", headers=AUTH).json()["exams"]}[course]["key"]
+    client.post("/v1/tasks", json={"key": key}, headers=AUTH)
+    return key
+
+
+def test_a_moved_exam_asks_and_nothing_changes_until_the_student_agrees(setup, api_settings):
+    client, tasks, _ = setup
+    key = add_exam(client, "OS")
+    assert outdated(client) == []
+    move_exam(api_settings, "OS", 9)
+    new_day = date.today() + timedelta(days=9)
+    found = outdated(client)
+    assert [(f["key"], f["to"]) for f in found] == [(key, new_day.isoformat())]
+    assert tasks.updates == []
+    assert client.post("/v1/tasks/update", json={"key": key}, headers=AUTH).json() == {"status": "updated"}
+    assert tasks.updates == [("task-1", new_day, "OS: Vize 2", "https://c/e")]
+    assert outdated(client) == []
+
+
+def test_an_estimate_becoming_firm_loses_its_mark_in_the_task(setup, api_settings):
+    client, tasks, _ = setup
+    key = add_exam(client, "TR")
+    assert tasks.added[0][0] == "TR: Final (tahmini)"
+    move_exam(api_settings, "TR", 12)
+    with closing(Store(api_settings.db_path)) as db:
+        db.db.execute("UPDATE exams SET status = 'announced', url = 'https://c/d' WHERE course = 'TR'")
+        db.db.commit()
+    client.post("/v1/tasks/update", json={"key": key}, headers=AUTH)
+    assert tasks.updates[0][2:] == ("TR: Final", "https://c/d")
+
+
+def test_saying_no_stops_asking_until_it_moves_again(setup, api_settings):
+    client, tasks, _ = setup
+    key = add_exam(client, "OS")
+    move_exam(api_settings, "OS", 9)
+    assert client.post("/v1/tasks/keep", json={"key": key}, headers=AUTH).json() == {"status": "kept"}
+    assert outdated(client) == [] and tasks.updates == []
+    move_exam(api_settings, "OS", 11)
+    assert len(outdated(client)) == 1
+
+
+def test_an_item_keeps_the_words_the_student_chose(setup, api_settings):
+    client, tasks, _ = setup
+    day = datetime.now(UTC) + timedelta(days=5)
+    with closing(Store(api_settings.db_path)) as db:
+        db.upsert(Item(key="assignment:9", kind="assignment", title="Ödev", course="OS", url="u", due_at=day), datetime.now(UTC))
+    client.post("/v1/tasks", json={"key": "assignment:9"}, headers=AUTH)
+    later = day + timedelta(days=3)
+    with closing(Store(api_settings.db_path)) as db:
+        db.upsert(Item(key="assignment:9", kind="assignment", title="Ödev", course="OS", url="u", due_at=later), datetime.now(UTC))
+    assert outdated(client)[0]["title"] == "OS: Ödev"
+    client.post("/v1/tasks/update", json={"key": "assignment:9"}, headers=AUTH)
+    assert tasks.updates[0][2:] == (None, None)
+
+
+def test_a_day_the_student_chose_never_asks(setup, api_settings):
+    client, tasks, _ = setup
+    chosen = (date.today() + timedelta(days=2)).isoformat()
+    client.post("/v1/tasks", json={"key": "announcement:1", "title": "Benim", "due": chosen}, headers=AUTH)
+    with closing(Store(api_settings.db_path)) as db:
+        db.upsert(Item(key="announcement:1", kind="announcement", title="Bring your laptop", course="OS", url="https://c/1", body="Bring it on Friday.", due_at=datetime.now(UTC) + timedelta(days=9)), datetime.now(UTC))
+    assert outdated(client) == []
+
+
+def test_a_task_deleted_by_hand_stops_being_asked_about(setup, api_settings):
+    client, tasks, _ = setup
+    key = add_exam(client, "OS")
+    move_exam(api_settings, "OS", 9)
+    tasks.gone = True
+    assert client.post("/v1/tasks/update", json={"key": key}, headers=AUTH).json() == {"status": "gone"}
+    assert outdated(client) == []
+    assert {e["course"]: e for e in client.get("/v1/today", headers=AUTH).json()["exams"]}["OS"]["inTasks"] is False
+
+
+def test_removing_a_task_forgets_its_date_and_unknown_keys_are_404(setup, api_settings):
+    client, _, _ = setup
+    key = add_exam(client, "OS")
+    client.post("/v1/tasks/remove", json={"key": key}, headers=AUTH)
+    move_exam(api_settings, "OS", 9)
+    assert outdated(client) == []
+    assert client.post("/v1/tasks/update", json={"key": key}, headers=AUTH).status_code == 404
+    assert client.post("/v1/tasks/keep", json={"key": "yok"}, headers=AUTH).status_code == 404
+
+
+def test_the_watcher_mentions_tasks_when_an_exam_in_them_moves(api_settings):
+    from ai_ders.watcher import TASK_MOVED, record_exams
+
+    now = datetime.now(UTC)
+    soon = date.today() + timedelta(days=4)
+    with closing(Store(api_settings.db_path)) as db:
+        db.put_exam("OS", Found("midterm", 0, soon, soon + timedelta(days=4), "estimated", 8, "file", "Hafta 8.", ""), TRUST, now)
+        moved = Found("midterm", 0, soon + timedelta(days=7), soon + timedelta(days=11), "estimated", 9, "file", "Hafta 9.", "")
+        assert record_exams(db, api_settings, "OS", [moved], now, quiet=False) == 0
+        db.set_meta("gtask:exam:OS:midterm:0", "task-1")
+        again = Found("midterm", 0, soon + timedelta(days=14), soon + timedelta(days=18), "estimated", 10, "file", "Hafta 10.", "")
+        assert record_exams(db, api_settings, "OS", [again], now, quiet=False) == 1
+        assert TASK_MOVED in db.db.execute("SELECT body FROM events ORDER BY id DESC LIMIT 1").fetchone()["body"]

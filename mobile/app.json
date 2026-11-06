@@ -2,7 +2,7 @@
   "expo": {
     "name": "AI Ders",
     "slug": "ai-ders",
-    "version": "0.2.10",
+    "version": "0.2.11",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",

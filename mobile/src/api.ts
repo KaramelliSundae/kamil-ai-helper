@@ -140,6 +140,14 @@ export const api = {
     c.mode === 'phone'
       ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
       : request<{ status: string }>(c, '/v1/tasks', 'POST', { key, ...choice }),
+  updateTask: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      : request<{ status: string }>(c, '/v1/tasks/update', 'POST', { key }),
+  keepTask: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      : request<{ status: string }>(c, '/v1/tasks/keep', 'POST', { key }),
   suggestTask: (c: Connection, key: string) =>
     c.mode === 'phone'
       ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
