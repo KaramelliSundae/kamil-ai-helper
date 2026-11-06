@@ -8,6 +8,17 @@ const dateTime = new Intl.DateTimeFormat('tr-TR', {
 
 const day = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' });
 
+const NEAR_EXAM_DAYS = 7;
+
+/** What needs attention first: whatever is within a week, however sure, then announced dates, then the rest. Soonest first in each. */
+export function examOrder<T extends { status: string; startsOn: string }>(exams: T[], now: number): T[] {
+  const rank = (exam: T) => {
+    if (daysUntil(exam.startsOn, now) <= NEAR_EXAM_DAYS) return 0;
+    return exam.status === 'announced' ? 1 : 2;
+  };
+  return [...exams].sort((a, b) => rank(a) - rank(b) || a.startsOn.localeCompare(b.startsOn));
+}
+
 export function formatDate(iso: string): string {
   return dateTime.format(new Date(iso));
 }

@@ -13,7 +13,7 @@ import {
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, padding, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
 import type { BuiltinShape } from '@expo/ui/jetpack-compose/modifiers';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
 import { api, Connection, Exam, GpuState, ItemDetail, Upcoming } from '../api';
@@ -23,7 +23,7 @@ import { ConfirmDialog } from '../ConfirmDialog';
 import { TodayKamil } from '../kamil';
 import { guest } from '../husamettin';
 import { ServerStatus } from '../ServerStatus';
-import { daysUntil, formatDate, isSoon, longDate, shortDay, timeLeft } from '../format';
+import { daysUntil, examOrder, formatDate, isSoon, longDate, shortDay, timeLeft } from '../format';
 import { icons } from '../icons';
 import { Choices, Header, Notice, Panel, rounded, ShapeIcon, shapes, Refreshable } from '../ui';
 import { UpdatePanel } from '../UpdatePanel';
@@ -218,7 +218,7 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
     }
   };
 
-  const exams = data?.exams ?? [];
+  const exams = useMemo(() => examOrder(data?.exams ?? [], Date.now()), [data]);
   const missing = data?.examsMissing ?? [];
   const renderExam = useCallback(
     ({ item }: { item: Exam }) => (
