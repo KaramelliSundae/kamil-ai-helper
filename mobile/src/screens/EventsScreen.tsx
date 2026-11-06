@@ -207,7 +207,7 @@ function CoursePicker({ courses, course, onChange }: {
       <DropdownMenu.Trigger>
         <FilterChip selected={!!course} onClick={() => setOpen(true)}>
           <FilterChip.Label>
-            <Text>{name ?? 'Ders'}</Text>
+            <Text>{name ?? 'Tüm dersler'}</Text>
           </FilterChip.Label>
           <FilterChip.TrailingIcon>
             <Icon source={icons.arrowDown} size={18} />
