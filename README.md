@@ -124,8 +124,7 @@ release builds. A build you signed yourself updates from your own server. Publis
 Kamil is a butler who lives on **Bugün**: his house on the left, his computer in the middle, his board on the right. He
 comes out when the app opens, says hello and goes back to work. Tap him and he turns to you, then really checks Canvas
 and mail at the computer, writes your nearest deadlines on the board, and tells you what he found. While the local model
-is off the GPU he sleeps in his house, behind a door that turns to glass. In **Sohbet** he paces up and down while an answer
-is on its way and says each step as it starts. Tap him too many times and he will tell you what he thinks of that. There is also an old acquaintance of his who drops
+is off the GPU he sleeps in his house, behind a door that turns to glass. In **Sohbet** he stays on his spot and acts out what the model is really doing: thinking, going down a clipboard, or writing on it. Tap him too many times and he will tell you what he thinks of that. There is also an old acquaintance of his who drops
 by now and then, if you know how to call him.
 
 ## Exams

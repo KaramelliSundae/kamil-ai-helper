@@ -14,6 +14,7 @@ import type {
   ModelId,
   Release,
   Today,
+  TaskOption,
 } from './types';
 import { ApiError } from './types';
 
