@@ -92,6 +92,22 @@ def test_openrouter_lists_free_models_first_with_what_is_left_today():
     assert options[1]["note"] == "Ücretli · 1M token $0.10 / $0.40 · 128K bağlam"
 
 
+@pytest.mark.parametrize("provider,base,wanted,unwanted", [
+    ("gemini", "", "x-goog-api-key", "authorization"),
+    ("openrouter", "", "authorization", "x-goog-api-key"),
+    ("custom", "https://x.example/v1", "authorization", "x-goog-api-key"),
+])
+def test_each_model_list_gets_only_its_own_kind_of_header(provider, base, wanted, unwanted):
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers)
+        return httpx.Response(200, json={"data": [], "models": []})
+
+    cloud_models(provider, "k", base, client_for(handler))
+    assert seen and all(wanted in h and unwanted not in h for h in seen)
+
+
 def test_a_bad_openrouter_key_is_refused_before_the_list():
     with pytest.raises(LlmBusy, match="kabul etmedi"):
         cloud_models("openrouter", "bad", client=client_for(lambda r: httpx.Response(401)))

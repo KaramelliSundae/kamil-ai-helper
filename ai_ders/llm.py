@@ -184,7 +184,9 @@ def cloud_models(provider: str, api_key: str, base_url: str = "", client: httpx.
 
     def get(url: str, **params: Any) -> Any:
         try:
-            response = client.get(url, params=params, headers={"Authorization": f"Bearer {api_key}", "x-goog-api-key": api_key})
+            # Google's own list wants its own header and may refuse a bearer key. The others should never see that header.
+            headers = {"x-goog-api-key": api_key} if url == GEMINI_MODELS_URL else {"Authorization": f"Bearer {api_key}"}
+            response = client.get(url, params=params, headers=headers)
         except httpx.HTTPError as error:
             raise LlmBusy(f"{name} servisine ulaşılamıyor") from error
         if response.status_code in (400, 401, 403):

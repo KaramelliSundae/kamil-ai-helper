@@ -124,7 +124,9 @@ export function openRouterOptions(models: OpenRouterModel[], daily: { remaining?
 }
 
 async function json(name: string, url: string, key: string): Promise<any> {
-  const response = await call(name, url, { headers: { Authorization: `Bearer ${key}`, 'x-goog-api-key': key } });
+  // Google's own list wants its own header and may refuse a bearer key. The others should never see that header.
+  const headers: Record<string, string> = url === GEMINI_MODELS ? { 'x-goog-api-key': key } : { Authorization: `Bearer ${key}` };
+  const response = await call(name, url, { headers });
   if ([400, 401, 403].includes(response.status)) throw new GeminiError(`${name} bu anahtarı kabul etmedi`);
   if (!response.ok) throw new GeminiError(`${name} hata verdi (${response.status})`);
   return response.json();
