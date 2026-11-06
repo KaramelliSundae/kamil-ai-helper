@@ -1,5 +1,6 @@
 import {
   Button,
+  Column,
   FilledTonalButton,
   LinearWavyProgressIndicator,
   LoadingIndicator,
@@ -12,9 +13,11 @@ import { fillMaxWidth } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { Connection, Release } from './api';
+import type { ChangeNote } from './changelog';
+import { dayMonth } from './format';
 import { icons } from './icons';
 import { Notice, Panel, ShapeIcon, shapes } from './ui';
-import { cancelUpdate, findUpdate, installedVersion, installUpdate, UpdateStage, updateStage } from './update';
+import { cancelUpdate, findUpdate, installedVersion, installUpdate, loadChangelog, UpdateStage, updateStage } from './update';
 
 function stageText(stage: UpdateStage): string {
   switch (stage.kind) {
@@ -33,11 +36,16 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [upToDate, setUpToDate] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notes, setNotes] = useState<ChangeNote[] | null>(null);
+  const [notesError, setNotesError] = useState<string | null>(null);
   const installed = installedVersion();
 
   const check = useCallback(async () => {
     setError(null);
     setUpToDate(false);
+    setNotes(null);
+    setNotesOpen(false);
     setBusy(true);
     try {
       const found = await findUpdate(connection);
@@ -61,6 +69,22 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
       await installUpdate(connection, release);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Güncelleme kurulamadı.');
+    }
+  };
+
+  const toggleNotes = async () => {
+    if (notesOpen) {
+      setNotesOpen(false);
+      return;
+    }
+    setNotesOpen(true);
+    setNotesError(null);
+    if (notes) return;
+    try {
+      setNotes(await loadChangelog(!!release));
+    } catch (reason) {
+      setNotesOpen(false);
+      setNotesError(reason instanceof Error ? `Değişiklikler alınamadı. ${reason.message}` : 'Değişiklikler alınamadı.');
     }
   };
 
@@ -89,6 +113,20 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
           ? `Kurulu: ${installed.name} (${installed.code}). Yeni: ${release.versionName} (${release.versionCode}).`
           : `Sürüm ${installed.name} (${installed.code}).${upToDate ? ' Bu en son sürüm.' : ''}`}
       </Text>
+      {notesOpen && !notes ? <LoadingIndicator /> : null}
+      {notesOpen && notes ? (
+        notes.length ? notes.map((note) => (
+          <Column key={note.version} verticalArrangement={{ spacedBy: 2 }}>
+            <Text color={onColor} style={{ typography: 'labelLarge', fontWeight: '700' }}>
+              {note.date ? `${note.version} · ${dayMonth(Date.parse(note.date))}` : note.version}
+            </Text>
+            {note.lines.map((line) => (
+              <Text key={line} color={onColor} style={{ typography: 'bodySmall' }}>{`• ${line}`}</Text>
+            ))}
+          </Column>
+        )) : <Text color={onColor} style={{ typography: 'bodySmall' }}>Kayıtlı değişiklik yok.</Text>
+      ) : null}
+      {notesError ? <Notice tone="error">{notesError}</Notice> : null}
       {/* Above the buttons: this panel is often the last thing on the screen, and what follows it can end up out of sight. */}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {working ? (
@@ -114,6 +152,9 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
               <Text>{busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}</Text>
             </FilledTonalButton>
           )}
+          <TextButton onClick={() => void toggleNotes()}>
+            <Text>{notesOpen ? 'Gizle' : release ? 'Neler değişecek?' : 'Yenilikler'}</Text>
+          </TextButton>
           {busy ? <LoadingIndicator /> : null}
         </Row>
       )}

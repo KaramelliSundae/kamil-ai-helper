@@ -12,10 +12,12 @@ import { AppState } from 'react-native';
 
 import { cancelDownload, downloadWithNotification, wasCancelled } from '../modules/app-update';
 import { api, Connection, Release, serverUrl } from './api';
+import { ChangeNote, changelog, GitHubRelease } from './changelog';
 import { CHANNEL_DEFAULT } from './phone/watcher';
 
-// A fork changes this to its own repository. Releases hold two files: latest.json and kamil.apk.
-const RELEASES = 'https://github.com/KaramelliSundae/kamil-ai-helper/releases/latest/download';
+// A fork changes this to its own repository. Releases hold two files, latest.json and kamil.apk, and their notes are the changelog.
+const REPOSITORY = 'KaramelliSundae/kamil-ai-helper';
+const RELEASES = `https://github.com/${REPOSITORY}/releases/latest/download`;
 const APK_TYPE = 'application/vnd.android.package-archive';
 const FLAG_GRANT_READ_URI_PERMISSION = 1;
 const READY_NOTICE = 'update-ready';
@@ -56,6 +58,15 @@ export async function findUpdate(connection: Connection | null): Promise<Release
   }
   const latest = await latestOnGitHub();
   return latest && latest.versionCode > installed ? latest : null;
+}
+
+/** See changelog.ts. Only the update's description depends on this, so a failure here stops nothing else. */
+export async function loadChangelog(newerOnly: boolean): Promise<ChangeNote[]> {
+  const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/releases?per_page=30`, {
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!response.ok) throw new Error(`GitHub hata verdi (${response.status}).`);
+  return changelog((await response.json()) as GitHubRelease[], installedVersion().name, newerOnly);
 }
 
 export type UpdateStage =

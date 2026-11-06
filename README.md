@@ -109,7 +109,8 @@ installs an update signed with the same key as the installed app, so switching k
 
 **Updates in server mode:** run `mobile/publish.sh` on the server after building there. Phones then show
 *Yeni sürüm hazır* and update themselves; the download is checked against its SHA-256. Its progress shows in the app and in
-the notifications, and it carries on if you leave the app.
+the notifications, and it carries on if you leave the app. **Neler değişecek?** lists the notes of every release since yours,
+read from this repository's Releases.
 
 **Updates from GitHub:** with no server, or a server with nothing newer to offer, **Ayarlar → Uygulama** checks this
 repository's [Releases](../../releases), and **Bugün** shows *Yeni sürüm hazır* when there is one. The download is checked
