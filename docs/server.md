@@ -60,8 +60,8 @@ default: mail tools are then not offered to Gemini at all.
   models; mail stays on your machine with the local one.
 - **Google Tasks.** See [google-tasks.md](google-tasks.md). Create a Google Cloud project, enable the Tasks API, create an OAuth client of type
   *Desktop app*, and press *Publish app* under *Audience* ("In production"; in "Testing" Google drops the
-  permission after 7 days). You don't need a website or Google's verification for your own use: ignore the
-  "requires verification" banner and accept the "unverified app" warning when you give permission. Download
+  permission after 7 days). Google asks for a home page and a privacy policy address first: the steps are in the guide. You don't need
+  Google's verification for your own use: ignore the "requires verification" banner and accept the "unverified app" warning when you give permission. Download
   the client JSON, copy it to the server and run
   `sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh /path/to/client.json`. The script deletes the
   file afterwards. Deadlines on the **Bugün** screen then have a button to add them to Google Tasks; tapping

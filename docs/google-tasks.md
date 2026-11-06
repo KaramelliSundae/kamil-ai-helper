@@ -28,7 +28,14 @@ Bunu APK'yı imzalayan kişi bir kez yapar, kullanıcılar yapmaz. Hepsi [Google
 
 1. **Proje aç:** [Yeni proje](https://console.cloud.google.com/projectcreate). Ad önemli değil.
 2. **Tasks API'yi aç:** [Tasks API](https://console.cloud.google.com/apis/library/tasks.googleapis.com) sayfasında **Enable**.
-3. **İzin ekranını kur:** [Auth overview](https://console.cloud.google.com/auth/overview) → **Get started**. Herhangi bir uygulama adı, destek e-postası olarak bir adresin, kitle olarak **External**.
+3. **İzin ekranını kur:** [Auth overview](https://console.cloud.google.com/auth/overview) → **Get started**, kitle olarak **External**. [Branding](https://console.cloud.google.com/auth/branding) sayfasında:
+   - **App name:** `Kamil`. Adda "google" geçmesin, Google reddedebilir.
+   - **User support email:** Bu adres izin ekranında kullanıcılara görünebilir. Kişisel adresin görünmesin istiyorsan bu iş için ayrı bir Gmail aç.
+   - **App logo:** Boş bırak. Logo yüklersen doğrulama başvurusu gerekir.
+   - **Application home page:** `https://github.com/KaramelliSundae/kamil-ai-helper`
+   - **Application privacy policy link:** `https://github.com/KaramelliSundae/kamil-ai-helper/blob/main/docs/privacy.md`
+   - **Authorised domains:** `github.com`
+   - **Developer contact email:** Kullanıcılara gösterilmez.
 4. **Uygulamayı yayınla:** [Audience](https://console.cloud.google.com/auth/audience) → **Publish app**. Durum **In production** olmalı. "Testing"de bırakırsan Google izni 7 günde düşürür.
 5. **Doğrulamayı atla:** Google uygulamanın doğrulanmadığını söyleyebilir. Az sayıda kişi için doğrulama başvurusu yapmak zorunda değilsin; aşağıdaki sınırları oku.
 6. **Android istemcisi oluştur:** [Clients](https://console.cloud.google.com/auth/clients) → **Create client** → tür **Android**.
