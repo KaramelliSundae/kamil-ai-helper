@@ -58,7 +58,7 @@ default: mail tools are then not offered to Gemini at all.
 - **Local model.** Run any OpenAI-compatible server on the same machine (llama.cpp's `llama-server`,
   Ollama, LM Studio) and set `LOCAL_LLM_URL`, for example `http://127.0.0.1:8080`. The app then offers both
   models; mail stays on your machine with the local one.
-- **Google Tasks.** Create a Google Cloud project, enable the Tasks API, create an OAuth client of type
+- **Google Tasks.** See [google-tasks.md](google-tasks.md). Create a Google Cloud project, enable the Tasks API, create an OAuth client of type
   *Desktop app*, and press *Publish app* under *Audience* ("In production"; in "Testing" Google drops the
   permission after 7 days). You don't need a website or Google's verification for your own use: ignore the
   "requires verification" banner and accept the "unverified app" warning when you give permission. Download

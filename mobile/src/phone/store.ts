@@ -71,6 +71,11 @@ export type PhoneState = {
     firstName?: string;
     schoolDomain?: string;
     nextReminderId?: number;
+    /** Tasks added to Google Tasks. `due` is null for a day the student chose, which is never followed. */
+    gtasks?: Record<string, { id: string; due: string | null }>;
+    /** The limit a model's own 429 named. */
+    quotaSeen?: Record<string, string>;
+    digestDay?: string;
   };
 };
 

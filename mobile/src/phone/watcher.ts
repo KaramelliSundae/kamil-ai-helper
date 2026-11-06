@@ -81,7 +81,7 @@ function recordChange(state: PhoneState, item: CanvasItem & { level?: string }, 
   } else if (change.type === 'due_changed') {
     const before = change.oldDue ? formatTime(change.oldDue) : 'yoktu';
     const after = item.dueAt ? formatTime(item.dueAt) : 'kaldırıldı';
-    addEvent(state, { ...base, level: deadlineLevel(item.dueAt, now), title: `Tarih değişti: ${label(item)}`, body: `Eski: ${before}\nYeni: ${after}` });
+    addEvent(state, { ...base, level: deadlineLevel(item.dueAt, now), title: `Tarih değişti: ${label(item)}`, body: `Eski: ${before}\nYeni: ${after}${state.meta.gtasks?.[item.key] ? `\n${TASK_MOVED}` : ''}` });
   } else if (change.type === 'graded') {
     addEvent(state, { ...base, level: 'high', title: `Not girildi: ${label(item)}`, body: `Not: ${item.grade}` });
   } else {
@@ -159,6 +159,7 @@ async function syncAlarms(state: PhoneState, now: Date): Promise<void> {
 }
 
 const EXAM_NAMES = { midterm: 'Vize', final: 'Final' };
+const TASK_MOVED = "Google Tasks'taki görev eski tarihte. Bugün ekranından güncelleyebilirsin.";
 const COURSES_PER_ROUND = 2; // a background round has little time, and each file is a Gemini request
 
 function recordExams(state: PhoneState, course: string, found: FoundExam[], now: Date, quiet: boolean): void {
@@ -169,12 +170,14 @@ function recordExams(state: PhoneState, course: string, found: FoundExam[], now:
     if (old && TRUST[old.status] > TRUST[exam.status]) continue;
     if (old && old.startsOn === exam.startsOn && old.status === exam.status) continue;
     state.exams[key] = { ...exam, course };
-    if (!quiet && exam.status === 'announced') {
-      const verb = old && old.status === exam.status ? 'tarihi değişti' : 'tarihi açıklandı';
+    const inTasks = !!state.meta.gtasks?.[key];
+    // Any date is worth a word once it is in the student's Tasks, however unsure it is.
+    if (!quiet && (exam.status === 'announced' || inTasks)) {
+      const verb = (old && old.status === exam.status) || exam.status !== 'announced' ? 'tarihi değişti' : 'tarihi açıklandı';
       const name = EXAM_NAMES[exam.kind] + (exam.number ? ` ${exam.number}` : '');
       addEvent(state, {
         itemKey: key, type: 'exam', level: 'high', title: `${course}: ${name} ${verb}`,
-        body: `Tarih: ${exam.startsOn.split('-').reverse().join('.')}\n${exam.evidence}`, url: exam.url, createdAt: now.toISOString(),
+        body: `Tarih: ${exam.startsOn.split('-').reverse().join('.')}${inTasks ? `\n${TASK_MOVED}` : ''}\n${exam.evidence}`, url: exam.url, createdAt: now.toISOString(),
       });
     }
   }
@@ -193,7 +196,7 @@ async function scanExams(settings: PhoneSettings, items: CanvasItem[], now: Date
   const scans: { id: number; course: string; scan: CourseScan }[] = [];
   if (every) {
     const courses = await activeCourses(creds);
-    const gemini = settings.geminiKey ? { key: settings.geminiKey, model: settings.geminiModel } : null;
+    const gemini = settings.geminiKey && settings.provider === 'gemini' ? { key: settings.geminiKey, model: settings.geminiModel } : null;
     for (const [id, course] of courses) {
       if (scans.length >= COURSES_PER_ROUND) break;
       const row = known[String(id)];

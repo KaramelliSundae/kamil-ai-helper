@@ -97,7 +97,7 @@ export type ChatSetup = {
   webmailUrl?: string;
   features?: { localModel: boolean; gpuGate: boolean; tasks: boolean };
 };
-export type GeminiSettings = { connected: boolean; source: 'server' | 'app' | null; model: string; mailAllowed: boolean };
+export type GeminiSettings = { connected: boolean; source: 'server' | 'app' | null; model: string; mailAllowed: boolean; provider?: 'gemini' | 'openrouter' | 'custom'; baseUrl?: string };
 export type Conversation = { id: number; title: string; updatedAt: string };
 export type EventSource = 'canvas' | 'mail';
 export type EventItem = {

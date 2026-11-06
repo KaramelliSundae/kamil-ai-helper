@@ -14,7 +14,8 @@
 import * as Notifications from 'expo-notifications';
 
 import { findAttendance } from './attendance';
-import { geminiChat, ChatMessage as WireMessage } from './gemini';
+import { CloudConfig, cloudChat } from './cloud';
+import type { ChatMessage as WireMessage } from './gemini';
 import { loadMailSettings } from './settings';
 import { PhoneState, readState, StoredItem, updateState } from './store';
 import { normalizeTr, shorten } from './text';
@@ -342,8 +343,14 @@ function systemPrompt(state: PhoneState, tools: PhoneTools, now: Date): { text: 
 
 export type Model = { chat: (messages: WireMessage[], tools: unknown[]) => Promise<WireMessage> };
 
-export function geminiModel(key: string, model: string): Model {
-  return { chat: (messages, tools) => geminiChat(key, model, messages, tools) };
+export function cloudModel(config: CloudConfig): Model {
+  return {
+    chat: (messages, tools) => cloudChat(config, messages, tools, (limit) => {
+      void updateState((state) => {
+        state.meta.quotaSeen = { ...state.meta.quotaSeen, [config.model]: limit };
+      });
+    }),
+  };
 }
 
 /** Answers one question and stores the turn. A question the model never answered leaves nothing behind. */

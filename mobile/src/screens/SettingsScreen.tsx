@@ -3,13 +3,11 @@ import {
   Button,
   Column,
   FilledTonalButton,
-  FlowRow,
   LoadingIndicator,
   OutlinedButton,
   OutlinedTextField,
   Row,
   Spacer,
-  SuggestionChip,
   Switch,
   Text,
   TextButton,
@@ -18,6 +16,7 @@ import {
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, height, padding, verticalScroll, weight } from '@expo/ui/jetpack-compose/modifiers';
 import { useEffect, useState } from 'react';
+import { Linking } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
 
 import { ServerReport } from '../aziz';
@@ -26,7 +25,10 @@ import { api, Connection, GeminiSettings, saveConnection, ServerConnection } fro
 import { askForNotifications, notificationsAllowed, sendTestNotification } from '../background';
 import { icons } from '../icons';
 import { checkMailAccount, forgetMail, mailProblem, parseMailHost } from '../phone/mail';
-import { DEFAULT_GEMINI_MODEL, loadMailSettings, loadPhoneSettings, modelChoices, saveMailAccount, saveMailToGemini } from '../phone/settings';
+import { ModelList, PROVIDER_CHOICES, PROVIDER_HINTS } from '../ModelPicker';
+import { cleanBaseUrl, ModelOption, modelOptions, Provider } from '../phone/cloud';
+import { DEFAULT_GEMINI_MODEL, loadGoogleConnected, loadMailSettings, loadPhoneSettings, saveGoogleConnected, saveMailAccount, saveMailToGemini } from '../phone/settings';
+import { connectGoogle } from '../phone/tasks';
 import { readState } from '../phone/store';
 import { poll } from '../phone/watcher';
 import { connectPhone, forgetPhone } from '../phone/setup';
@@ -93,7 +95,11 @@ function PhonePanel({ connection, onSaved }: Props) {
   const [token, setToken] = useState('');
   const [key, setKey] = useState('');
   const [model, setModel] = useState(DEFAULT_GEMINI_MODEL);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [provider, setProvider] = useState<Provider>('gemini');
+  const baseUrlState = useNativeState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [fetching, setFetching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,15 +115,48 @@ function PhonePanel({ connection, onSaved }: Props) {
       setToken(saved.canvasToken);
       setKey(saved.geminiKey);
       setModel(saved.geminiModel);
+      setProvider(saved.provider);
+      baseUrlState.set(saved.baseUrl);
+      setBaseUrl(saved.baseUrl);
     }, () => undefined);
-  }, [keyState, modelState, tokenState, urlState]);
+  }, [baseUrlState, keyState, modelState, tokenState, urlState]);
+
+  const pickModel = (id: string) => {
+    modelState.set(id);
+    setModel(id);
+  };
+
+  const fetchModels = async () => {
+    setFetching(true);
+    setError(null);
+    try {
+      const address = provider === 'custom' ? cleanBaseUrl(baseUrl) : '';
+      if (address === null) throw new Error('Servis adresini https:// ile yaz.');
+      const options = await modelOptions({ provider, key: key.trim(), baseUrl: address }, (await readState()).meta.quotaSeen);
+      setModels(options);
+      if (options.length && !options.some((option) => option.id === model)) pickModel(options[0].id);
+    } catch (reason) {
+      setModels([]);
+      setError(reason instanceof Error ? reason.message : 'Modeller alınamadı.');
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const chooseProvider = (next: Provider) => {
+    setProvider(next);
+    setModels([]);
+    keyState.set('');
+    setKey('');
+    pickModel(next === 'gemini' ? DEFAULT_GEMINI_MODEL : '');
+  };
 
   const save = async () => {
     setBusy(true);
     setError(null);
     setMessage(null);
     try {
-      const result = await connectPhone({ canvasUrl: url, canvasToken: token, geminiKey: key, geminiModel: model });
+      const result = await connectPhone({ canvasUrl: url, canvasToken: token, provider, baseUrl, geminiKey: key, geminiModel: model });
       modelState.set(result.model);
       setModel(result.model);
       setModels(result.models);
@@ -125,7 +164,7 @@ function PhonePanel({ connection, onSaved }: Props) {
       onSaved({ mode: 'phone' });
       setMessage(
         `Hazır: ${result.name || 'Canvas'} bağlandı, ${result.items} kayıt okundu.` +
-          (key.trim() ? ` Kamil ${result.model} ile çalışacak.` : ' Gemini anahtarı olmadan sohbet kapalı.'),
+          (key.trim() ? ` Kamil ${result.model} ile çalışacak.` : ' Model anahtarı olmadan sohbet kapalı.'),
       );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Kurulamadı.');
@@ -148,24 +187,20 @@ function PhonePanel({ connection, onSaved }: Props) {
   return (
     <Panel>
       <SectionTitle icon={icons.today} title="Telefon" />
-      <Hint>Sunucu gerekmez: telefon Canvas'a ve Gemini'ye kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul mailini aşağıdan ekleyebilirsin.</Hint>
+      <Hint>Sunucu gerekmez: telefon Canvas'a ve seçtiğin modele kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul mailini ve Google Tasks'ı aşağıdan ekleyebilirsin.</Hint>
       <Field label="Canvas adresi" placeholder="https://canvas.okulun.edu" state={urlState} onChange={setUrl} uri />
       <Field label="Canvas erişim belirteci" state={tokenState} onChange={setToken} secret />
       <Hint>Canvas'ta Hesap → Ayarlar → Yeni erişim belirteci. Kamil bununla yalnızca okur, hiçbir şey göndermez.</Hint>
-      <Field label="Gemini API anahtarı (isteğe bağlı)" state={keyState} onChange={setKey} secret />
-      <Field label="Gemini modeli" state={modelState} onChange={setModel} />
-      <Hint>Anahtarı aistudio.google.com'dan alırsın. Ücretsiz katmanda Google yazdıklarını eğitim için kullanabilir.</Hint>
-      {models.length ? (
-        <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {modelChoices(models).map((name) => (
-            <SuggestionChip key={name} onClick={() => { modelState.set(name); setModel(name); }}>
-              <SuggestionChip.Label>
-                <Text>{name}</Text>
-              </SuggestionChip.Label>
-            </SuggestionChip>
-          ))}
-        </FlowRow>
-      ) : null}
+      <Text style={{ typography: 'titleSmall', fontWeight: '700' }}>Yapay zeka modeli</Text>
+      <Choices value={provider} onChange={chooseProvider} options={PROVIDER_CHOICES} />
+      {provider === 'custom' ? <Field label="Servis adresi" placeholder="https://api.servis.com/v1" state={baseUrlState} onChange={setBaseUrl} uri /> : null}
+      <Field label="API anahtarı (isteğe bağlı)" state={keyState} onChange={setKey} secret />
+      <Hint>{PROVIDER_HINTS[provider]}</Hint>
+      <FilledTonalButton enabled={key.trim().length > 0 && !fetching} onClick={() => void fetchModels()}>
+        <Text>{fetching ? 'Modeller getiriliyor…' : 'Modelleri getir'}</Text>
+      </FilledTonalButton>
+      <ModelList options={models} value={model} provider={provider} onPick={pickModel} />
+      <Field label="Model" state={modelState} onChange={setModel} />
       <Spacer modifiers={[height(4)]} />
       <Busy busy={busy} label="Kaydet ve başla" enabled={url.trim().length > 0 && token.trim().length > 0} onClick={() => void save()} />
       {message ? <Notice>{message}</Notice> : null}
@@ -181,7 +216,7 @@ function PhonePanel({ connection, onSaved }: Props) {
             <Text>Her şey silinsin mi?</Text>
           </AlertDialog.Title>
           <AlertDialog.Text>
-            <Text>Canvas belirteci, Gemini anahtarı, sohbetler, notlar ve taslaklar bu telefondan silinir. Canvas'taki hiçbir şey değişmez.</Text>
+            <Text>Canvas belirteci, model anahtarı, Google izni, sohbetler, notlar ve taslaklar bu telefondan silinir. Canvas'taki hiçbir şey değişmez.</Text>
           </AlertDialog.Text>
           <AlertDialog.ConfirmButton>
             <TextButton onClick={() => void forget()}>
@@ -190,6 +225,90 @@ function PhonePanel({ connection, onSaved }: Props) {
           </AlertDialog.ConfirmButton>
           <AlertDialog.DismissButton>
             <TextButton onClick={() => setConfirmForget(false)}>
+              <Text>Vazgeç</Text>
+            </TextButton>
+          </AlertDialog.DismissButton>
+        </AlertDialog>
+      ) : null}
+    </Panel>
+  );
+}
+
+const GOOGLE_PERMISSIONS = 'https://myaccount.google.com/permissions';
+const GOOGLE_STEPS = [
+  "1. Birazdan Google'ın ekranı açılacak. Görevlerinin durduğu hesabı seç.",
+  '2. "Google bu uygulamayı doğrulamadı" uyarısı çıkarsa Gelişmiş\'e, sonra uygulamaya git\'e bas.',
+  '3. Görevlerine erişim iznini onayla. Kamil yalnızca Tasks\'ı görür; Gmail, Drive ve takvimine erişemez.',
+  '4. Bitti. Bundan sonra Hatırlatıcı ekle ve sınav düğmeleri görevi doğrudan ekler, tarih değişirse sana sorar.',
+];
+
+/** Optional: without it a task goes out through the share sheet. Android keeps the permission; nothing secret is stored here. */
+function PhoneTasksPanel() {
+  const colors = useMaterialColors();
+  const [connected, setConnected] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadGoogleConnected().then(setConnected, () => undefined);
+  }, []);
+
+  const connect = async () => {
+    setShowSteps(false);
+    setBusy(true);
+    setError(null);
+    try {
+      await connectGoogle();
+      setConnected(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Google'a bağlanılamadı.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    await saveGoogleConnected(false);
+    setConnected(false);
+  };
+
+  return (
+    <Panel>
+      <SectionTitle icon={icons.addTask} title="Google Tasks" />
+      {connected ? (
+        <>
+          <Text color={colors.primary} style={{ typography: 'bodyMedium', fontWeight: '600' }}>Bağlı: görevler doğrudan eklenir.</Text>
+          <OutlinedButton onClick={() => void disconnect()}>
+            <Text>Bağlantıyı kaldır</Text>
+          </OutlinedButton>
+          <Hint>Kamil bu telefonda artık görev eklemez. İzni tamamen silmek için Google hesap izinlerine git.</Hint>
+          <TextButton onClick={() => void Linking.openURL(GOOGLE_PERMISSIONS)}>
+            <Text>Google hesap izinleri</Text>
+          </TextButton>
+        </>
+      ) : (
+        <>
+          <Hint>Bağlanmadan da görev ekleyebilirsin: paylaşım ekranı açılır, Tasks'ı veya başka bir uygulamayı seçersin. Bağlanırsan görev tarihiyle doğrudan eklenir. Gemini anahtarı bunun yerine geçmez.</Hint>
+          <Busy busy={busy} label="Google hesabına bağlan" enabled onClick={() => setShowSteps(true)} />
+        </>
+      )}
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {showSteps ? (
+        <AlertDialog onDismissRequest={() => setShowSteps(false)}>
+          <AlertDialog.Title>
+            <Text>Google hesabına bağlanma</Text>
+          </AlertDialog.Title>
+          <AlertDialog.Text>
+            <Text>{GOOGLE_STEPS.join('\n\n')}</Text>
+          </AlertDialog.Text>
+          <AlertDialog.ConfirmButton>
+            <TextButton onClick={() => void connect()}>
+              <Text>Devam et</Text>
+            </TextButton>
+          </AlertDialog.ConfirmButton>
+          <AlertDialog.DismissButton>
+            <TextButton onClick={() => setShowSteps(false)}>
               <Text>Vazgeç</Text>
             </TextButton>
           </AlertDialog.DismissButton>
@@ -271,8 +390,8 @@ function PhoneMailPanel({ connection }: { connection: Connection | null }) {
       {connected ? (
         <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
           <Column modifiers={[weight(1)]}>
-            <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili Gemini'ye gitsin</Text>
-            <Hint>Kapalıyken mailler yalnızca Bildirimler'de durur, sohbette Gemini görmez. Açarsan Kamil'in okuduğu mail metinleri Google'a gider.</Hint>
+            <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili bulut modele gitsin</Text>
+            <Hint>Kapalıyken mailler yalnızca Bildirimler'de durur, sohbette bulut model görmez. Açarsan Kamil'in okuduğu mail metinleri Google'a gider.</Hint>
           </Column>
           <Switch
             value={toGemini}
@@ -351,7 +470,10 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
   const [key, setKey] = useState('');
   const [model, setModel] = useState('');
   const [settings, setSettings] = useState<GeminiSettings | null>(null);
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [provider, setProvider] = useState<Provider>('gemini');
+  const baseUrlState = useNativeState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -359,10 +481,21 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
     setSettings(next);
     modelState.set(next.model);
     setModel(next.model);
+    setProvider(next.provider ?? 'gemini');
+    baseUrlState.set(next.baseUrl ?? '');
+    setBaseUrl(next.baseUrl ?? '');
+  };
+
+  const pickModel = (id: string) => {
+    modelState.set(id);
+    setModel(id);
   };
 
   useEffect(() => {
-    api.geminiSettings(connection).then(show, () => setSettings(null));
+    api.geminiSettings(connection).then((found) => {
+      show(found);
+      if (found.connected) api.cloudModels(connection).then(setModels, () => undefined);
+    }, () => setSettings(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection]);
 
@@ -373,7 +506,7 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
       show(await action());
       keyState.set('');
       setKey('');
-      setModels(await api.geminiModels(connection).catch(() => []));
+      setModels(await api.cloudModels(connection).catch(() => []));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Kaydedilemedi.');
     } finally {
@@ -384,28 +517,21 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
   if (!settings) return null;
   return (
     <Panel>
-      <SectionTitle icon={icons.cloud} title="Gemini" />
+      <SectionTitle icon={icons.cloud} title="Bulut model" />
       <Text color={settings.connected ? colors.primary : colors.onSurfaceVariant} style={{ typography: 'bodyMedium', fontWeight: '600' }}>
         {settings.connected ? `Bağlı: ${settings.model}${settings.source === 'server' ? ' (anahtar sunucuda ayarlı)' : ''}` : 'Bağlı değil'}
       </Text>
-      {settings.source !== 'server' ? <Field label="Gemini API anahtarı" state={keyState} onChange={setKey} secret /> : null}
+      {settings.source !== 'server' ? <Choices value={provider} onChange={(next) => { setProvider(next); setModels([]); pickModel(''); }} options={PROVIDER_CHOICES} /> : null}
+      {provider === 'custom' ? <Field label="Servis adresi" placeholder="https://api.servis.com/v1" state={baseUrlState} onChange={setBaseUrl} uri /> : null}
+      {settings.source !== 'server' ? <Field label="API anahtarı" state={keyState} onChange={setKey} secret /> : null}
+      <Hint>{PROVIDER_HINTS[provider]}</Hint>
+      <ModelList options={models} value={model} provider={provider} onPick={pickModel} />
       <Field label="Model" state={modelState} onChange={setModel} />
-      {models.length ? (
-        <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {modelChoices(models).map((name) => (
-            <SuggestionChip key={name} onClick={() => { modelState.set(name); setModel(name); }}>
-              <SuggestionChip.Label>
-                <Text>{name}</Text>
-              </SuggestionChip.Label>
-            </SuggestionChip>
-          ))}
-        </FlowRow>
-      ) : null}
       {settings.connected ? (
         <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
           <Column modifiers={[weight(1)]}>
-            <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili Gemini'ye gitsin</Text>
-            <Hint>Kapalıyken Gemini maillerini görmez. Açarsan mail metinleri Google'a gider.</Hint>
+            <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili bulut modele gitsin</Text>
+            <Hint>Kapalıyken bulut model maillerini görmez. Açarsan mail metinleri seçtiğin sağlayıcıya gider.</Hint>
           </Column>
           <Switch value={settings.mailAllowed} onCheckedChange={(on) => void act(() => api.setGeminiSettings(connection, { mailAllowed: on }))} />
         </Row>
@@ -414,7 +540,7 @@ function ServerGeminiPanel({ connection }: { connection: ServerConnection }) {
         busy={busy}
         label={key.trim() ? 'Anahtarı kaydet' : 'Modeli kaydet'}
         enabled={key.trim().length > 0 || (settings.connected && model.trim().length > 0)}
-        onClick={() => void act(() => api.setGeminiSettings(connection, key.trim() ? { key: key.trim(), model: model.trim() || undefined } : { model: model.trim() }))}
+        onClick={() => void act(() => api.setGeminiSettings(connection, key.trim() ? { key: key.trim(), model: model.trim() || undefined, provider, baseUrl: provider === 'custom' ? baseUrl.trim() : undefined } : { model: model.trim() }))}
       />
       {settings.connected && settings.source === 'app' ? (
         <OutlinedButton onClick={() => void act(() => api.deleteGeminiKey(connection))}>
@@ -489,6 +615,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
 
       {mode === 'phone' ? <PhonePanel connection={connection} onSaved={onSaved} /> : <ServerPanel connection={connection} onSaved={onSaved} />}
       {mode === 'phone' ? <PhoneMailPanel connection={connection} /> : null}
+      {mode === 'phone' ? <PhoneTasksPanel /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerReport connection={connection} /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerStatus connection={connection} showModes /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerGeminiPanel connection={connection} /> : null}

@@ -360,7 +360,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
           </Column>
         ) : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
-        {noModel ? <Notice>Kamil'le konuşmak için Ayarlar'dan bir Gemini API anahtarı gir.</Notice> : null}
+        {noModel ? <Notice>Kamil'le konuşmak için Ayarlar'dan bir model anahtarı gir.</Notice> : null}
         <Surface color={colors.surfaceContainerHigh} shape={rounded(28)} modifiers={[fillMaxWidth()]}>
           <Row modifiers={[padding(4, 4, 8, 4)]} verticalAlignment="center">
             <TextField
@@ -388,10 +388,10 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
         {current.id === 'gemini' && !noModel ? (
           <Text color={colors.outline} modifiers={[padding(12, 0, 0, 0)]} style={{ typography: 'labelSmall' }}>
             {phone
-              ? "Kamil, Gemini ile bulutta çalışır: sorduğun Canvas bilgileri Google'a gider."
+              ? "Kamil bulut modelle çalışır: sorduğun Canvas bilgileri seçtiğin sağlayıcıya gider."
               : current.detail.includes('Mail açık')
-                ? "Gemini bulutta çalışır. Mail izni açık: okul maillerin de Google'a gider."
-                : 'Gemini bulutta çalışır. Okul maillerin ona gönderilmez.'}
+                ? "Model bulutta çalışır. Mail izni açık: okul maillerin de sağlayıcıya gider."
+                : 'Model bulutta çalışır. Okul maillerin ona gönderilmez.'}
           </Text>
         ) : null}
       </Column>

@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from .agent import answer
 from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
-from .llm import GeminiClient, LlmBusy, LlmClient, gemini_models
+from .llm import PROVIDER_NAMES, GeminiClient, LlmBusy, LlmClient, clean_base_url, cloud_models, gemini_models
 from .suggest import clean_title, suggest_tasks
 from .notify import send_approved_draft
 from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS
@@ -88,8 +88,10 @@ class PriorityRequest(BaseModel):
 
 class GeminiSettingsRequest(BaseModel):
     key: str | None = Field(default=None, min_length=10, max_length=200)
-    model: str | None = Field(default=None, max_length=80, pattern=r"^[\w.-]+$")
+    model: str | None = Field(default=None, max_length=120, pattern=r"^[\w.:/@-]+$")
     mailAllowed: bool | None = None
+    provider: Literal["gemini", "openrouter", "custom"] | None = None
+    baseUrl: str | None = Field(default=None, max_length=200)
 
 
 TURNS_KEPT = 8
@@ -144,6 +146,7 @@ def create_app(
     tasks: Any = None,
     gemini: Any = None,
     gemini_lister: Any = None,
+    cloud_lister: Any = None,
 ) -> FastAPI:
     """`llm` is the local model, or None for a Gemini-only server. `gemini` and `gemini_lister` are for tests."""
     settings = settings or Settings.from_env()
@@ -154,6 +157,7 @@ def create_app(
         tasks = GoogleTasks(GoogleCredentials.parse(settings.google_tasks))
     injected_gemini = gemini
     list_models = gemini_lister or gemini_models
+    list_cloud = cloud_lister or cloud_models
     gemini_path = settings.state_dir / GEMINI_FILE
     gate = settings.gpu_gate_url.rstrip("/")
     app = FastAPI(title="ai-ders", docs_url=None, redoc_url=None, openapi_url=None)
@@ -188,8 +192,12 @@ def create_app(
     def current_gemini() -> Any:
         if injected_gemini is not None:
             return injected_gemini
-        key, _ = gemini_key()
-        return GeminiClient(key, gemini_model()) if key else None
+        key, source = gemini_key()
+        if not key:
+            return None
+        config = gemini_config()
+        provider = "gemini" if source == "server" else config.get("provider", "gemini")
+        return GeminiClient(key, gemini_model(), provider=provider, base_url=config.get("baseUrl", ""))
 
     def mail_to_gemini() -> bool:
         return gemini_config().get("mailAllowed") is True
@@ -518,7 +526,8 @@ def create_app(
             models.append({"id": "local", "name": "Kamil", "detail": "Yerel model. Veri bu sunucudan çıkmaz."})
         if gemini is not None:
             mail = "Mail açık" if mail_to_gemini() else "Mail kapalı"
-            name = "Gemini" if llm is not None else "Kamil"
+            label = PROVIDER_NAMES.get(getattr(gemini, "provider", "gemini"), "Bulut model")
+            name = label if llm is not None else "Kamil"
             models.append({"id": "gemini", "name": name, "detail": f"{gemini.model}. Bulutta. {mail}."})
         first = (settings.student_name or "").split()
         return {
@@ -532,22 +541,40 @@ def create_app(
     @app.get("/v1/settings/gemini", dependencies=guarded)
     def gemini_settings() -> dict[str, Any]:
         key, source = gemini_key()
-        return {"connected": key is not None, "source": source, "model": gemini_model(), "mailAllowed": mail_to_gemini()}
+        config = gemini_config()
+        provider = "gemini" if source == "server" else config.get("provider", "gemini")
+        return {"provider": provider, "baseUrl": config.get("baseUrl", ""), "connected": key is not None, "source": source, "model": gemini_model(), "mailAllowed": mail_to_gemini()}
 
     @app.put("/v1/settings/gemini", dependencies=guarded)
     def set_gemini_settings(request: GeminiSettingsRequest) -> dict[str, Any]:
         """A new key is checked with Google first, and kept only if Google accepts it."""
         config = gemini_config()
+        provider = request.provider or config.get("provider", "gemini")
+        if request.provider and request.provider != config.get("provider", "gemini") and request.key is None:
+            raise HTTPException(400, "Yeni sağlayıcı için anahtarını da gir")
+        if request.baseUrl is not None:
+            base_url = clean_base_url(request.baseUrl)
+            if base_url is None:
+                raise HTTPException(400, "Servis adresini https:// ile yaz")
+            config["baseUrl"] = base_url
         if request.key is not None:
             if settings.gemini_key:
                 raise HTTPException(409, "anahtar sunucuda ayarlı, uygulamadan değiştirilemez")
             key = request.key.strip()
+            if provider == "custom" and not config.get("baseUrl"):
+                raise HTTPException(400, "Servis adresini https:// ile yaz")
             try:
-                available = list_models(key)
+                if provider == "gemini":
+                    available = list_models(key)
+                else:
+                    available = [option["id"] for option in list_cloud(provider, key, config.get("baseUrl", ""))]
             except LlmBusy as error:
                 raise HTTPException(400, str(error)) from error
             config["key"] = key
-            if request.model is None and available and gemini_model() not in available:
+            config["provider"] = provider
+            if request.model is None and provider != "gemini" and available:
+                config["model"] = available[0]
+            elif request.model is None and available and gemini_model() not in available:
                 config["model"] = settings.gemini_model if settings.gemini_model in available else available[0]
         if request.model is not None:
             config["model"] = request.model
@@ -562,6 +589,19 @@ def create_app(
         config.pop("key", None)
         save_gemini_config(config)
         return gemini_settings()
+
+    @app.get("/v1/settings/cloud/models", dependencies=guarded)
+    def cloud_model_list() -> list[dict[str, Any]]:
+        """Each model with what is known of its limits, for the picker."""
+        key, source = gemini_key()
+        if key is None:
+            raise HTTPException(409, "Model anahtarı yok")
+        config = gemini_config()
+        provider = "gemini" if source == "server" else config.get("provider", "gemini")
+        try:
+            return list_cloud(provider, key, config.get("baseUrl", ""))
+        except LlmBusy as error:
+            raise HTTPException(502, str(error)) from error
 
     @app.get("/v1/settings/gemini/models", dependencies=guarded)
     def gemini_model_list() -> list[str]:

@@ -4,11 +4,14 @@
  */
 import { Linking } from 'react-native';
 
-import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, Today } from '../types';
+import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, TaskOption, Today } from '../types';
 import { ApiError } from '../types';
-import { answer, geminiModel } from './agent';
+import { answer, cloudModel } from './agent';
+import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
-import { loadPhoneSettings, saveSyllabusCheckDays } from './settings';
+import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays } from './settings';
+import { suggestTasks } from './suggest';
+import { addTask, keepTask, localDay, outdatedTasks, removeTask, updateTask } from './tasks';
 import { readState, updateState } from './store';
 import { poll } from './watcher';
 
@@ -47,17 +50,19 @@ export const phoneApi = {
     const upcoming = Object.values(state.items)
       .filter((i) => i.dueAt && !i.submitted && Date.parse(i.dueAt) >= now && Date.parse(i.dueAt) <= now + UPCOMING_DAYS * 864e5)
       .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))
-      .map((i) => ({ key: i.key, kind: i.kind, title: i.title, course: i.course, url: i.url, dueAt: i.dueAt! }));
+      .map((i) => ({ key: i.key, kind: i.kind, title: i.title, course: i.course, url: i.url, dueAt: i.dueAt!, inTasks: !!state.meta.gtasks?.[i.key] }));
     const ready = !!settings.geminiKey;
     return {
       upcoming,
       pendingDrafts: state.drafts.filter((d) => d.status === 'pending').length,
-      gpu: { mode: 'phone', llmActive: ready, blocked: ready ? null : "Gemini anahtarı yok, Ayarlar'dan gir" },
-      tasksEnabled: false,
+      gpu: { mode: 'phone', llmActive: ready, blocked: ready ? null : "Model anahtarı yok, Ayarlar'dan gir" },
+      // Without a Google connection a task still goes out through the share sheet.
+      tasksEnabled: true,
+      tasksOutdated: outdatedTasks(state, localDay(new Date(now).toISOString())),
       exams: Object.entries(state.exams ?? {})
         .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
         .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
-        .map(([key, exam]) => ({ ...exam, key })),
+        .map(([key, exam]) => ({ ...exam, key, inTasks: !!state.meta.gtasks?.[key] })),
       examsMissing: Object.values(state.examCourses ?? {})
         .filter((row) => !row.hasSyllabus && !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course))
         .map((row) => ({ course: row.course, hint: row.hint })),
@@ -124,7 +129,7 @@ export const phoneApi = {
     if (!row) throw new ApiError('kayıt bulunamadı', 404);
     return {
       key: row.key, kind: row.kind, title: row.title, course: row.course, sender: row.sender, body: row.body, url: row.url,
-      postedAt: row.postedAt, dueAt: row.dueAt, grade: row.grade, submitted: row.submitted, attachments: [],
+      postedAt: row.postedAt, dueAt: row.dueAt, grade: row.grade, submitted: row.submitted, attachments: [], inTasks: !!state.meta.gtasks?.[key],
     };
   },
 
@@ -132,20 +137,42 @@ export const phoneApi = {
     const [state, settings] = await Promise.all([readState(), loadPhoneSettings()]);
     return {
       firstName: state.meta.firstName ?? null,
-      models: settings.geminiKey ? [{ id: 'gemini', name: 'Kamil', detail: `${settings.geminiModel}. Bulutta, bu telefondan.` }] : [],
+      models: settings.geminiKey ? [{ id: 'gemini', name: 'Kamil', detail: `${PROVIDER_NAMES[settings.provider]}: ${settings.geminiModel}. Bulutta, bu telefondan.` }] : [],
       schoolDomain: state.meta.schoolDomain ?? '',
       webmailUrl: '',
-      features: { localModel: false, gpuGate: false, tasks: false },
+      features: { localModel: false, gpuGate: false, tasks: true },
     };
   },
 
   async send(text: string, conversationId: number | null, onStep?: (step: string) => void): Promise<{ reply: string; conversationId: number }> {
     const settings = await loadPhoneSettings();
-    if (!settings.geminiKey) throw new ApiError("Sohbet için Ayarlar'dan Gemini API anahtarını gir.", 409);
+    const config = cloudConfig(settings);
+    if (!config) throw new ApiError("Sohbet için Ayarlar'dan bir model anahtarı gir.", 409);
     try {
-      return await answer(geminiModel(settings.geminiKey, settings.geminiModel), text, conversationId, onStep);
+      return await answer(cloudModel(config), text, conversationId, onStep);
     } catch (error) {
       throw new ApiError(error instanceof GeminiError || error instanceof Error ? error.message : 'Cevap alınamadı.', 503);
+    }
+  },
+
+  addTask,
+  updateTask,
+  keepTask,
+  removeTask,
+
+  /** Only when the student taps for it, and it adds nothing. The same rules as chat: mail only if allowed. */
+  async suggestTask(key: string): Promise<{ options: TaskOption[] }> {
+    const [state, settings, mail] = await Promise.all([readState(), loadPhoneSettings(), loadMailSettings()]);
+    const row = state.items[key];
+    if (!row) throw new ApiError('kayıt bulunamadı', 404);
+    const config = cloudConfig(settings);
+    if (!config) throw new ApiError('Model bağlı değil, görevi kendin yazabilirsin', 409);
+    if (row.kind === 'mail' && !mail.toGemini) throw new ApiError('Mailler bulut modele kapalı, görevi kendin yazabilirsin', 409);
+    try {
+      const options = await suggestTasks(cloudModel(config).chat, row, localDay(new Date().toISOString()));
+      return { options };
+    } catch (error) {
+      throw new ApiError(error instanceof Error ? error.message : 'Öneri alınamadı.', 503);
     }
   },
 

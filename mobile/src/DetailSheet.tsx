@@ -117,6 +117,10 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
     setError(null);
     try {
       const { status } = await api.addTask(connection, target.key);
+      if (status === 'shared') {
+        setNote('Paylaşım ekranı açıldı: Tasks, Keep veya başka bir uygulamayı seçebilirsin.');
+        return;
+      }
       setNote(status === 'exists' ? "Zaten Google Tasks'ta." : "Google Tasks'a eklendi.");
       setTaskAdded(true);
     } catch (reason) {
@@ -187,6 +191,10 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
             onCancel={() => setPicking(false)}
             onAdded={(status) => {
               setPicking(false);
+              if (status === 'shared') {
+                setNote('Paylaşım ekranı açıldı: Tasks, Keep veya başka bir uygulamayı seçebilirsin.');
+                return;
+              }
               setTaskAdded(true);
               setNote(status === 'exists' ? "Zaten Google Tasks'ta." : "Google Tasks'a eklendi.");
             }}

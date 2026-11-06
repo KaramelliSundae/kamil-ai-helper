@@ -4,23 +4,17 @@
  */
 import * as SecureStore from 'expo-secure-store';
 
+import type { CloudConfig, Provider } from './cloud';
+
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
-/** Older than the newest models, so it would fall off a short list, but kept on offer for its generous limits. */
-export const GENEROUS_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-const MODEL_CHOICES = 6;
-
-/** The models to offer as shortcuts, newest first, out of those the key may call. */
-export function modelChoices(models: string[]): string[] {
-  const newest = models.slice(0, MODEL_CHOICES);
-  if (!models.includes(GENEROUS_GEMINI_MODEL) || newest.includes(GENEROUS_GEMINI_MODEL)) return newest;
-  return [...newest.slice(0, MODEL_CHOICES - 1), GENEROUS_GEMINI_MODEL];
-}
-
 const KEYS = {
   canvasUrl: 'phone.canvasUrl',
   canvasToken: 'phone.canvasToken',
   geminiKey: 'phone.geminiKey',
   geminiModel: 'phone.geminiModel',
+  provider: 'phone.provider',
+  baseUrl: 'phone.baseUrl',
+  googleConnected: 'phone.googleConnected',
   syllabusCheckDays: 'phone.syllabusCheckDays',
   mailHost: 'phone.mailHost',
   mailUser: 'phone.mailUser',
@@ -31,17 +25,21 @@ const KEYS = {
 /** Every file read is one Gemini request, so by default a course with no syllabus yet is looked at once a week. */
 export const DEFAULT_SYLLABUS_CHECK_DAYS = 7;
 
-export type PhoneSettings = { canvasUrl: string; canvasToken: string; geminiKey: string; geminiModel: string; syllabusCheckDays: number };
+export type PhoneSettings = { canvasUrl: string; canvasToken: string; provider: Provider; baseUrl: string; geminiKey: string; geminiModel: string; syllabusCheckDays: number };
 
 export async function loadPhoneSettings(): Promise<PhoneSettings> {
-  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays] = await Promise.all([
+  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays, provider, baseUrl] = await Promise.all([
     SecureStore.getItemAsync(KEYS.canvasUrl),
     SecureStore.getItemAsync(KEYS.canvasToken),
     SecureStore.getItemAsync(KEYS.geminiKey),
     SecureStore.getItemAsync(KEYS.geminiModel),
     SecureStore.getItemAsync(KEYS.syllabusCheckDays),
+    SecureStore.getItemAsync(KEYS.provider),
+    SecureStore.getItemAsync(KEYS.baseUrl),
   ]);
   return {
+    provider: (provider as Provider | null) ?? 'gemini',
+    baseUrl: baseUrl ?? '',
     canvasUrl: canvasUrl ?? '',
     canvasToken: canvasToken ?? '',
     geminiKey: geminiKey ?? '',
@@ -55,6 +53,23 @@ export async function savePhoneSettings(settings: Omit<PhoneSettings, 'syllabusC
   await SecureStore.setItemAsync(KEYS.canvasToken, settings.canvasToken);
   await SecureStore.setItemAsync(KEYS.geminiKey, settings.geminiKey);
   await SecureStore.setItemAsync(KEYS.geminiModel, settings.geminiModel || DEFAULT_GEMINI_MODEL);
+  await SecureStore.setItemAsync(KEYS.provider, settings.provider);
+  await SecureStore.setItemAsync(KEYS.baseUrl, settings.baseUrl);
+}
+
+export function cloudConfig(settings: PhoneSettings): CloudConfig | null {
+  if (!settings.geminiKey) return null;
+  return { provider: settings.provider, key: settings.geminiKey, model: settings.geminiModel, baseUrl: settings.baseUrl };
+}
+
+/** Only whether the student connected: Android keeps the permission itself, and no token is stored here. */
+export async function loadGoogleConnected(): Promise<boolean> {
+  return (await SecureStore.getItemAsync(KEYS.googleConnected)) === 'yes';
+}
+
+export async function saveGoogleConnected(connected: boolean): Promise<void> {
+  if (connected) await SecureStore.setItemAsync(KEYS.googleConnected, 'yes');
+  else await SecureStore.deleteItemAsync(KEYS.googleConnected);
 }
 
 export async function saveSyllabusCheckDays(days: number): Promise<void> {

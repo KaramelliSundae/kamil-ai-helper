@@ -10,6 +10,7 @@ import * as TaskManager from 'expo-task-manager';
 
 import { api, EventItem, loadConnection } from './api';
 import { CHANNEL_DEFAULT, CHANNEL_URGENT } from './phone/watcher';
+import { readState, updateState } from './phone/store';
 import { poll } from './phone/watcher';
 
 const TASK = 'ai-ders-events';
@@ -18,6 +19,8 @@ const SEEN_LIMIT = 300;
 const STALE_MS = 24 * 3600 * 1000;
 // Same quiet hours as the server's default: only critical events between 00:00 and 08:00.
 const QUIET_END_HOUR = 8;
+const DIGEST_HOUR = 8;
+const DIGEST_DAYS = 3;
 
 export { CHANNEL_DEFAULT, CHANNEL_URGENT };
 
@@ -86,11 +89,35 @@ export function decide(event: EventItem, now: Date): 'notify' | 'skip' | 'wait' 
   return now.getHours() < QUIET_END_HOUR ? 'wait' : 'notify';
 }
 
+/** The server mails a daily digest. Without one, the first wake after this hour says the same in a notification. */
+async function phoneDigest(now = new Date()): Promise<void> {
+  if (now.getHours() < DIGEST_HOUR || !(await notificationsAllowed())) return;
+  const day = now.toDateString();
+  const state = await readState();
+  if (state.meta.digestDay === day) return;
+  const soon = Object.values(state.items).filter((item) => {
+    const due = item.dueAt ? Date.parse(item.dueAt) : 0;
+    return due >= now.getTime() && due < now.getTime() + DIGEST_DAYS * 864e5 && !item.submitted;
+  }).length;
+  const unread = state.events.filter((event) => event.read === false && event.type !== 'reminder').length;
+  await updateState((saved) => {
+    saved.meta.digestDay = day;
+  });
+  if (!soon && !unread) return;
+  await Notifications.scheduleNotificationAsync({
+    content: { title: 'Günün özeti', body: `${DIGEST_DAYS} gün içinde ${soon} teslim, ${unread} okunmamış bildirim.` },
+    trigger: { channelId: CHANNEL_DEFAULT },
+  });
+}
+
 /** Shows new events once each. The first run only learns what already exists, so it never floods. */
 export async function checkEvents(): Promise<number> {
   const connection = await loadConnection();
   if (!connection) return 0;
-  if (connection.mode === 'phone') await poll().catch(() => undefined);
+  if (connection.mode === 'phone') {
+    await poll().catch(() => undefined);
+    await phoneDigest().catch(() => undefined);
+  }
   const events = await api.events(connection);
   // The two modes number their events separately, so each keeps its own memory of what it showed.
   const seenKey = connection.mode === 'phone' ? `${SEEN_KEY}.phone` : SEEN_KEY;

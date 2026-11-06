@@ -20,7 +20,7 @@ The app's interface is in Turkish.
 | Deadline reminders | Exact alarms 72, 24 and 3 hours before | Same, prepared by the server |
 | Chat model | Gemini 3.8 Flash (cloud) | Gemini, or a local model (llama.cpp, Ollama, LM Studio) |
 | Mail drafts | Open in your phone's mail app; you press send | Sent by the server after you approve them in the app |
-| Google Tasks | No | Optional |
+| Google Tasks | Optional, or the share sheet with no setup | Optional |
 
 Start with **phone only**: it needs no other machine. Move to a server later if you want it running when your phone is
 off, a sandbox around mail, or a local model. The app has both, you choose in Settings.

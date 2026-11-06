@@ -3,12 +3,13 @@
  * then the first round learns what already exists without notifying anything.
  */
 import { CanvasError, profile } from './canvas';
-import { GeminiError, geminiModels } from './gemini';
+import { cleanBaseUrl, ModelOption, modelOptions } from './cloud';
+import { GeminiError } from './gemini';
 import { canvasHost, clearPhoneSettings, DEFAULT_GEMINI_MODEL, PhoneSettings, savePhoneSettings } from './settings';
-import { clearState, updateState } from './store';
+import { clearState, readState, updateState } from './store';
 import { poll } from './watcher';
 
-export type SetupResult = { name: string; items: number; models: string[]; model: string };
+export type SetupResult = { name: string; items: number; models: ModelOption[]; model: string };
 
 /** Mail under this domain counts as the school's: the student's own address, else Canvas's host minus "canvas.". */
 function schoolDomainOf(email: string, host: string): string {
@@ -29,18 +30,22 @@ export async function connectPhone(input: Omit<PhoneSettings, 'syllabusCheckDays
   } catch (error) {
     throw new Error(error instanceof CanvasError ? error.message : "Canvas'a bağlanılamadı");
   }
-  let models: string[] = [];
-  let model = input.geminiModel.trim() || DEFAULT_GEMINI_MODEL;
+  let models: ModelOption[] = [];
+  let model = input.geminiModel.trim();
   const geminiKey = input.geminiKey.trim();
+  const baseUrl = input.provider === 'custom' ? cleanBaseUrl(input.baseUrl) : '';
   if (geminiKey) {
+    if (baseUrl === null) throw new Error('Servis adresini https:// ile yaz.');
     try {
-      models = await geminiModels(geminiKey);
+      models = await modelOptions({ provider: input.provider, key: geminiKey, baseUrl }, (await readState()).meta.quotaSeen);
     } catch (error) {
-      throw new Error(error instanceof GeminiError ? error.message : "Gemini'ye bağlanılamadı");
+      throw new Error(error instanceof GeminiError ? error.message : 'Modele bağlanılamadı');
     }
-    if (models.length && !models.includes(model)) model = models.includes(DEFAULT_GEMINI_MODEL) ? DEFAULT_GEMINI_MODEL : models[0];
+    const ids = models.map((option) => option.id);
+    const preferred = input.provider === 'gemini' && ids.includes(DEFAULT_GEMINI_MODEL) ? DEFAULT_GEMINI_MODEL : ids[0];
+    if (ids.length && !ids.includes(model)) model = preferred;
   }
-  await savePhoneSettings({ canvasUrl, canvasToken, geminiKey, geminiModel: model });
+  await savePhoneSettings({ canvasUrl, canvasToken, provider: input.provider, baseUrl: baseUrl ?? '', geminiKey, geminiModel: model || DEFAULT_GEMINI_MODEL });
   await updateState((state) => {
     // Canvas often keeps names in capitals: "AYŞE YILMAZ" greets as "Ayşe".
     const first = who.name.split(/\s+/)[0] ?? '';

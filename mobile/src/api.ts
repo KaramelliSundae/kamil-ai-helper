@@ -1,6 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 
 import { phoneApi } from './phone/api';
+import type { ModelOption, Provider } from './phone/cloud';
 import type {
   ChatMessage,
   ChatSetup,
@@ -138,23 +139,23 @@ export const api = {
     c.mode === 'phone' ? phoneApi.item(key) : request<ItemDetail>(c, `/v1/items/${encodeURIComponent(key)}`, 'GET'),
   addTask: (c: Connection, key: string, choice?: { title: string; due?: string | null }) =>
     c.mode === 'phone'
-      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      ? phoneApi.addTask(key, choice)
       : request<{ status: string }>(c, '/v1/tasks', 'POST', { key, ...choice }),
   updateTask: (c: Connection, key: string) =>
     c.mode === 'phone'
-      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      ? phoneApi.updateTask(key)
       : request<{ status: string }>(c, '/v1/tasks/update', 'POST', { key }),
   keepTask: (c: Connection, key: string) =>
     c.mode === 'phone'
-      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      ? phoneApi.keepTask(key)
       : request<{ status: string }>(c, '/v1/tasks/keep', 'POST', { key }),
   suggestTask: (c: Connection, key: string) =>
     c.mode === 'phone'
-      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      ? phoneApi.suggestTask(key)
       : request<{ options: TaskOption[] }>(c, '/v1/tasks/suggest', 'POST', { key }),
   removeTask: (c: Connection, key: string) =>
     c.mode === 'phone'
-      ? Promise.reject(new ApiError('Google Tasks yalnızca sunucuyla çalışır', 409))
+      ? phoneApi.removeTask(key)
       : request<{ status: string }>(c, '/v1/tasks/remove', 'POST', { key }),
   drafts: (c: Connection) => (c.mode === 'phone' ? phoneApi.drafts() : request<Draft[]>(c, '/v1/drafts', 'GET')),
   sendDraft: (c: Connection, draft: Draft) =>
@@ -174,8 +175,8 @@ export const api = {
     c.mode === 'phone' ? Promise.reject(new ApiError('sunucu yok', 404)) : request<Release>(c, '/v1/app/latest', 'GET'),
   // Gemini on a server: the key is checked by the server with Google and kept there.
   geminiSettings: (c: ServerConnection) => request<GeminiSettings>(c, '/v1/settings/gemini', 'GET'),
-  setGeminiSettings: (c: ServerConnection, change: { key?: string; model?: string; mailAllowed?: boolean }) =>
+  setGeminiSettings: (c: ServerConnection, change: { key?: string; model?: string; mailAllowed?: boolean; provider?: Provider; baseUrl?: string }) =>
     request<GeminiSettings>(c, '/v1/settings/gemini', 'PUT', change),
   deleteGeminiKey: (c: ServerConnection) => request<GeminiSettings>(c, '/v1/settings/gemini', 'DELETE'),
-  geminiModels: (c: ServerConnection) => request<string[]>(c, '/v1/settings/gemini/models', 'GET'),
+  cloudModels: (c: ServerConnection) => request<ModelOption[]>(c, '/v1/settings/cloud/models', 'GET'),
 };

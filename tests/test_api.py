@@ -60,7 +60,7 @@ ROUTES = [
     ("post", "/v1/drafts/x/send"), ("post", "/v1/drafts/x/discard"), ("get", "/v1/gpu"), ("post", "/v1/gpu"),
     ("get", "/v1/app/latest"), ("get", "/v1/app/apk"), ("get", "/v1/items/mail:5:101"),
     ("get", "/v1/images/" + "a" * 64), ("get", "/v1/settings/gemini"), ("put", "/v1/settings/gemini"),
-    ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"),
+    ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"), ("get", "/v1/settings/cloud/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
     ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
 ]
@@ -351,7 +351,7 @@ def test_a_gemini_key_from_the_app_is_checked_kept_private_and_used(api_settings
     bad = client.put("/v1/settings/gemini", json={"key": "AIza-yanlis-anahtar"}, headers=AUTH)
     assert bad.status_code == 400 and not (api_settings.state_dir / "gemini.json").exists()
     good = client.put("/v1/settings/gemini", json={"key": "AIza-dogru-anahtar"}, headers=AUTH).json()
-    assert good == {"connected": True, "source": "app", "model": "gemini-3.8-flash", "mailAllowed": False}
+    assert good == {"provider": "gemini", "baseUrl": "", "connected": True, "source": "app", "model": "gemini-3.8-flash", "mailAllowed": False}
     stored = api_settings.state_dir / "gemini.json"
     assert stored.stat().st_mode & 0o777 == 0o600
     assert "AIza" not in client.get("/v1/settings/gemini", headers=AUTH).text  # the key never comes back
