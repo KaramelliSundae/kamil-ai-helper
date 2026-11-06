@@ -50,7 +50,7 @@ Google and keeps it in its state folder (mode 0600). Instead you can store it as
 with `sudo /opt/ai-ders/deploy/linux/connect-gemini.sh`; a key stored that way cannot be changed from the
 app.
 
-The **Okul maili Gemini'ye gitsin** switch decides whether Gemini may read your mail. It is off by
+The **Okul maili bulut modele gitsin** switch decides whether the cloud model may read your mail. It is off by
 default: mail tools are then not offered to Gemini at all.
 
 ## Optional

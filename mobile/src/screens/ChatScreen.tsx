@@ -214,7 +214,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
   const conversationId = session.conversationId;
   const messages = session.messages;
   const sending = session.waitingOn !== null;
-  const waitingLabel = session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Gemini çalışıyor…' : 'Kamil düşünüyor…');
+  const waitingLabel = session.steps[session.steps.length - 1] ?? (session.waitingOn === 'gemini' ? 'Model çalışıyor…' : 'Kamil düşünüyor…');
   const error = session.error;
   const text = session.draft;
 

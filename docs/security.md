@@ -64,7 +64,7 @@ There is no sandbox on a phone, so the phone does much less with a mail than the
 - **Parsing.** `phone/mailparse.ts` is JavaScript. It reads headers and text parts, at most 256 KB of a mail, and lists attachment
   names without decoding them. No image, attachment or HTML is opened, rendered or fetched, and no link is followed.
 - **The password** is in Android's encrypted storage and goes only to that mail server.
-- **Gemini.** Mail reaches the model only if you turn on **Okul maili Gemini'ye gitsin**. Without it the mail tools are not offered at
+- **Gemini.** Mail reaches the model only if you turn on **Okul maili bulut modele gitsin**. Without it the mail tools are not offered at
   all, and `get_assignment` refuses mail keys. With it, mail is fenced and taints the turn, as on the server.
 
 ## Syllabi and exam dates
@@ -143,7 +143,7 @@ never sent back to the app.
 ## What goes to Google with Gemini
 
 Your question and the information Kamil looks up for it: Canvas data, and mail only if you turned on
-**Okul maili Gemini'ye gitsin** on a server. On Gemini's free tier Google may use this to improve its
+**Okul maili bulut modele gitsin**. On Gemini's free tier Google may use this to improve its
 models. Use a local model on a server if that matters to you.
 
 ## Limits

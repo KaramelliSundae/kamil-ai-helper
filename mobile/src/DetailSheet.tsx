@@ -204,7 +204,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           {work && detail && onSolve ? (
             <Button onClick={() => onSolve(detail)}>
               <Icon source={icons.cloud} size={18} />
-              <Text modifiers={[paddingAll(4)]}>Gemini ile çöz</Text>
+              <Text modifiers={[paddingAll(4)]}>Yapay zekayla çöz</Text>
             </Button>
           ) : null}
           {(work && tasksEnabled || remindable) && taskAdded ? (

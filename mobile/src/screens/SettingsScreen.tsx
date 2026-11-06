@@ -391,7 +391,7 @@ function PhoneMailPanel({ connection }: { connection: Connection | null }) {
         <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
           <Column modifiers={[weight(1)]}>
             <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>Okul maili bulut modele gitsin</Text>
-            <Hint>Kapalıyken mailler yalnızca Bildirimler'de durur, sohbette bulut model görmez. Açarsan Kamil'in okuduğu mail metinleri Google'a gider.</Hint>
+            <Hint>Kapalıyken mailler yalnızca Bildirimler'de durur, sohbette bulut model görmez. Açarsan Kamil'in okuduğu mail metinleri seçtiğin sağlayıcıya gider.</Hint>
           </Column>
           <Switch
             value={toGemini}
