@@ -6,7 +6,8 @@ import { sendSmtp } from '../../modules/mail-socket';
 
 export class SmtpError extends Error {}
 
-const BARE_ADDRESS = /^[^\s@<>,;:"()[\]\\]+@[^\s@<>,;:"()[\]\\]+\.[^\s@<>,;:"()[\]\\]+$/;
+// Printable ASCII only: see SendMail.kt. Anything else goes through the mail app, if at all.
+const BARE_ADDRESS = /^[!#-'*+\-./0-9=?A-Z^-~]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 export type Outgoing = {
   from: string;
