@@ -9,7 +9,10 @@ import { File, Paths } from 'expo-file-system';
 
 import { AttendanceNote, findAttendance, MAX_ATTENDANCE_NOTES } from './attendance';
 import { courseFile, courseFiles, courseInfo, CanvasItem, frontPage, moduleItems } from './canvas';
-import { geminiReadPdf } from './gemini';
+import { minuteLimit } from './cloud';
+import { geminiReadPdf, RateLimited } from './gemini';
+import { queued } from './modelQueue';
+import { readState } from './store';
 import { htmlToText } from './text';
 
 export type ExamStatus = 'announced' | 'syllabus' | 'estimated';
@@ -273,17 +276,12 @@ async function downloadPdf(url: string): Promise<string | null> {
 /** Gemini's limit is not the same as an unreadable file: the course is read again, not put off for a week. */
 export class ScanLater extends Error {}
 
-const PDF_GAP_MS = 6500; // about 9 a minute: 3.5 Flash-Lite allows about 10
-let lastPdfRead = 0;
-
-async function pacedRead(gemini: NonNullable<Gemini>, data: string): Promise<string> {
-  const wait = lastPdfRead + PDF_GAP_MS - Date.now();
-  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-  lastPdfRead = Date.now();
+async function queuedRead(gemini: NonNullable<Gemini>, data: string): Promise<string> {
+  const perMinute = minuteLimit({ provider: 'gemini', model: gemini.model }, (await readState()).meta.quotaSeen);
   try {
-    return await geminiReadPdf(gemini.key, gemini.model, data);
+    return await queued('Syllabus okuma', gemini.model, perMinute, () => geminiReadPdf(gemini.key, gemini.model, data), true);
   } catch (error) {
-    if (error instanceof Error && /\b429\b/.test(error.message)) throw new ScanLater(error.message);
+    if (error instanceof RateLimited) throw new ScanLater(error.message);
     return '';
   }
 }
@@ -337,7 +335,7 @@ export async function scanCourse(creds: { url: string; token: string }, courseId
   const read = async (url: string): Promise<string> => {
     if (!gemini) return '';
     const data = await downloadPdf(url);
-    return data ? pacedRead(gemini, data) : '';
+    return data ? queuedRead(gemini, data) : '';
   };
   for (const file of wanted.slice(0, MAX_FILES_PER_COURSE)) {
     if (!gemini) {

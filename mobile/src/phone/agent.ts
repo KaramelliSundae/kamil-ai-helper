@@ -14,11 +14,12 @@
 import * as Notifications from 'expo-notifications';
 
 import { findAttendance } from './attendance';
-import { CloudConfig, cloudChat } from './cloud';
+import { CloudConfig, cloudChat, minuteLimit } from './cloud';
 import type { ChatMessage as WireMessage } from './gemini';
 import { loadMailSettings } from './settings';
 import { PhoneState, readState, StoredItem, updateState } from './store';
 import { normalizeTr, shorten } from './text';
+import { queued } from './modelQueue';
 import { CHANNEL_DEFAULT, formatTime } from './watcher';
 
 const MAX_STEPS = 6;
@@ -343,13 +344,16 @@ function systemPrompt(state: PhoneState, tools: PhoneTools, now: Date): { text: 
 
 export type Model = { chat: (messages: WireMessage[], tools: unknown[]) => Promise<WireMessage> };
 
-export function cloudModel(config: CloudConfig): Model {
+export function cloudModel(config: CloudConfig, label = 'Sohbet'): Model {
   return {
-    chat: (messages, tools) => cloudChat(config, messages, tools, (limit) => {
-      void updateState((state) => {
-        state.meta.quotaSeen = { ...state.meta.quotaSeen, [config.model]: limit };
-      });
-    }),
+    chat: async (messages, tools) => {
+      const perMinute = minuteLimit(config, (await readState()).meta.quotaSeen);
+      return queued(label, config.model, perMinute, () => cloudChat(config, messages, tools, (limit) => {
+        void updateState((state) => {
+          state.meta.quotaSeen = { ...state.meta.quotaSeen, [config.model]: limit };
+        });
+      }));
+    },
   };
 }
 

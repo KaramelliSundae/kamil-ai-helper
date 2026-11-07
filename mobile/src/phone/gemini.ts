@@ -6,6 +6,32 @@ const TIMEOUT_MS = 120_000;
 
 export class GeminiError extends Error {}
 
+/** A 429. `minute` can wait its turn; `day` cannot. Providers that do not say which count as a minute's. */
+export class RateLimited extends GeminiError {
+  constructor(message: string, readonly scope: 'minute' | 'day', readonly limit: string | null, readonly retryMs: number | null) {
+    super(message);
+  }
+}
+
+/** What a 429 says about the limit that was hit, such as "20 istek/gün". Google sends it; others may not. */
+export function seenLimit(body: string): string | null {
+  const value = body.match(/"quotaValue"\s*:\s*"?(\d+)/)?.[1];
+  const id = body.match(/"quotaId"\s*:\s*"([^"]+)"/)?.[1] ?? '';
+  if (!value || !/request/i.test(id)) return null;
+  if (/PerDay/i.test(id)) return `${value} istek/gün`;
+  return /PerMinute/i.test(id) ? `${value} istek/dk` : null;
+}
+
+export function rateLimited(name: string, body: string, retryAfter: string | null | undefined): RateLimited {
+  const limit = seenLimit(body);
+  const day = /PerDay|per-day|per day|daily/i.test(body);
+  const seconds = Number(body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/)?.[1] ?? retryAfter ?? NaN);
+  const note = limit ? ` (sınır: ${limit})` : '';
+  return day
+    ? new RateLimited(`${name} günlük sınırı doldu${note}. Yarın tekrar dene ya da Ayarlar'dan başka bir model seç`, 'day', limit, null)
+    : new RateLimited(`${name} dakikalık sınırı doldu${note}, biraz sonra tekrar dene`, 'minute', limit, Number.isFinite(seconds) ? seconds * 1000 : null);
+}
+
 export type ChatMessage = { role: string; content: string; tool_calls?: ToolCall[]; tool_call_id?: string };
 export type ToolCall = { id?: string; type?: string; function: { name: string; arguments?: string } };
 
@@ -40,6 +66,7 @@ export async function geminiReadPdf(key: string, model: string, base64: string):
       generationConfig: { temperature: 0 },
     }),
   });
+  if (response.status === 429) throw rateLimited('Gemini', await response.text().catch(() => ''), response.headers?.get?.('retry-after'));
   if (!response.ok) throw new GeminiError(`Gemini hata verdi (${response.status})`);
   const body = await response.json();
   const parts = body?.candidates?.[0]?.content?.parts ?? [];

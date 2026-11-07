@@ -210,7 +210,7 @@ export const phoneApi = {
     if (!config) throw new ApiError('Model bağlı değil, görevi kendin yazabilirsin', 409);
     if (row.kind === 'mail' && !mail.toGemini) throw new ApiError('Mailler bulut modele kapalı, görevi kendin yazabilirsin', 409);
     try {
-      const options = await suggestTasks(cloudModel(config).chat, row, localDay(new Date().toISOString()));
+      const options = await suggestTasks(cloudModel(config, 'Hatırlatıcı önerisi').chat, row, localDay(new Date().toISOString()));
       return { options };
     } catch (error) {
       throw new ApiError(error instanceof Error ? error.message : 'Öneri alınamadı.', 503);
@@ -230,7 +230,7 @@ export const phoneApi = {
       .sort((a, b) => (a.postedAt ?? '').localeCompare(b.postedAt ?? ''));
     let body: string;
     try {
-      body = await writeReply(cloudModel(config).chat, thread.length ? thread : [row], state.meta.firstName);
+      body = await writeReply(cloudModel(config, 'Mail taslağı').chat, thread.length ? thread : [row], state.meta.firstName);
     } catch (error) {
       throw new ApiError(error instanceof Error ? error.message : 'Taslak yazılamadı.', 503);
     }

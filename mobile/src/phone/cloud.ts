@@ -3,7 +3,7 @@
  * header, never in a URL, so it cannot end up in a log line. Mirrors ai_ders/llm.py.
  */
 import type { ChatMessage } from './gemini';
-import { GeminiError } from './gemini';
+import { GeminiError, rateLimited, seenLimit } from './gemini';
 
 export type Provider = 'gemini' | 'openrouter' | 'custom';
 export type CloudConfig = { provider: Provider; key: string; model: string; baseUrl: string };
@@ -44,13 +44,15 @@ async function call(name: string, url: string, init: RequestInit): Promise<Respo
   }
 }
 
-/** What a 429 says about the limit that was hit, such as "20 istek/gün". Google sends it; others may not. */
-export function seenLimit(body: string): string | null {
-  const value = body.match(/"quotaValue"\s*:\s*"?(\d+)/)?.[1];
-  const id = body.match(/"quotaId"\s*:\s*"([^"]+)"/)?.[1] ?? '';
-  if (!value || !/request/i.test(id)) return null;
-  if (/PerDay/i.test(id)) return `${value} istek/gün`;
-  return /PerMinute/i.test(id) ? `${value} istek/dk` : null;
+export { seenLimit };
+
+/** How many calls a minute to plan for: what the provider told us, else what is known. A wrong guess only means a later 429 waits. */
+export function minuteLimit(config: Pick<CloudConfig, 'provider' | 'model'>, seen: Record<string, string> = {}): number {
+  const told = seen[config.model]?.match(/(\d+) istek\/dk/)?.[1];
+  if (told) return Number(told);
+  if (config.provider === 'openrouter') return config.model.endsWith(':free') ? FREE_PER_MINUTE : Number.POSITIVE_INFINITY;
+  const approx = config.provider === 'gemini' ? GEMINI_APPROX.find(([pattern]) => pattern.test(config.model))?.[1].match(/(\d+) istek\/dk/)?.[1] : null;
+  return approx ? Number(approx) : Number.POSITIVE_INFINITY;
 }
 
 export async function cloudChat(config: CloudConfig, messages: ChatMessage[], tools: unknown[], onLimit?: (limit: string) => void): Promise<ChatMessage> {
@@ -66,9 +68,9 @@ export async function cloudChat(config: CloudConfig, messages: ChatMessage[], to
     body: JSON.stringify(body),
   });
   if (response.status === 429) {
-    const limit = seenLimit(await response.text().catch(() => ''));
-    if (limit) onLimit?.(limit);
-    throw new GeminiError(`${name} kotası doldu${limit ? ` (sınır: ${limit})` : ''}, biraz sonra tekrar dene`);
+    const limited = rateLimited(name, await response.text().catch(() => ''), response.headers?.get?.('retry-after'));
+    if (limited.limit) onLimit?.(limited.limit);
+    throw limited;
   }
   if (response.status === 401 || response.status === 403) throw new GeminiError(`${name} anahtarı geçersiz, Ayarlar'dan yeniden gir`);
   if (response.status === 404) throw new GeminiError(`${name}: ${config.model} kullanılamıyor. Ayarlar'dan başka bir model seç`);

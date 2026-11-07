@@ -9,6 +9,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as TaskManager from 'expo-task-manager';
 
 import { api, EventItem, loadConnection } from './api';
+import { CHANNEL_QUEUE } from './phone/modelQueue';
 import { CHANNEL_DEFAULT, CHANNEL_URGENT } from './phone/watcher';
 import { readState, updateState } from './phone/store';
 import { poll } from './phone/watcher';
@@ -46,6 +47,11 @@ async function setUpChannels(): Promise<void> {
   await Notifications.setNotificationChannelAsync(CHANNEL_URGENT, {
     name: 'Acil: son saatler',
     importance: Notifications.AndroidImportance.MAX,
+  });
+  // What waits for the model's limit: it updates quietly while it waits.
+  await Notifications.setNotificationChannelAsync(CHANNEL_QUEUE, {
+    name: 'Yapay zeka sırası',
+    importance: Notifications.AndroidImportance.LOW,
   });
   await Notifications.setNotificationChannelAsync(CHANNEL_DEFAULT, {
     name: 'Ödevler, duyurular, önemli mailler',
