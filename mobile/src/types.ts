@@ -11,6 +11,8 @@ export type Upcoming = {
 };
 export type GpuState = {
   mode: string;
+  /** The server this machine names. Compute opens it, and it stays up until AI-Asistan is chosen. */
+  server?: { name: string; known: boolean; up: boolean; busy: boolean };
   llmActive: boolean;
   blocked: string | null;
   gateMissing?: boolean;
@@ -29,7 +31,7 @@ export type GpuState = {
     cores?: number;
   };
   lastPollAt?: string | null;
-  /** What this server calls the program that comes first on the GPU. */
+  /** What this server calls its image program. */
   imageAppName?: string | null;
   /** What Kamil has done since midnight. */
   today?: { answers: number; notifications: number };
@@ -38,6 +40,8 @@ export type ServerJob = {
   id: string;
   label: string;
   gpu: boolean;
+  /** Stays up until someone stops it, with no time limit. */
+  server?: boolean;
   status: string;
   note: string;
   finishedAt?: number | null;

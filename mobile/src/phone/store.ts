@@ -66,6 +66,8 @@ export type PhoneState = {
     lastError?: string;
     canvasFailures?: number;
     mailCursor?: { uidvalidity: number; lastUid: number };
+    /** The last two weeks went in the list once, by source. */
+    backfilled?: { canvas?: boolean; mail?: boolean };
     mailFailures?: number;
     mailError?: string;
     firstName?: string;

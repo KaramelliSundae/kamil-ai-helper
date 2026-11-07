@@ -27,6 +27,8 @@ const STATUS: Record<string, string> = {
 
 function headline(state: GpuState): string {
   const running = state.jobs?.find((job) => job.gpu && job.status === 'running');
+  if (state.server?.up) return `${state.server.name} sunucusu açık, Kamil diskte.`;
+  if (running?.server) return `GPU'da sunucu açık: ${running.label || running.id}`;
   if (running) return `GPU'da hesaplama işi var: ${running.label || running.id}`;
   if (state.llmActive) return 'Kamil GPU\'da, hazır.';
   return state.blocked ?? 'Kamil diskte, ilk soruda açılır.';
@@ -74,6 +76,7 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
   const [lastPollAt, setLastPollAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
+  const [confirmKamil, setConfirmKamil] = useState(false);
   // Shown at once: the server's answer takes a moment, and a button that waits for it looks broken.
   const [choosing, setChoosing] = useState<string | null>(null);
 
@@ -105,9 +108,16 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
   const active = jobs.filter((job) => job.status === 'running' || job.status === 'queued');
   const recent = jobs.filter((job) => !active.includes(job)).slice(-2).reverse();
   const gpuJob = active.some((job) => job.gpu && job.status === 'running');
+  const server = state.server;
+  const serverHolds = !!server?.up || active.some((job) => job.server && job.gpu && job.status === 'running');
   const priority = state.prioritySeconds ?? 0;
   const setPriority = (on: boolean) => act(() => api.setKamilPriority(connection, on));
   const chooseMode = async (mode: string) => {
+    // Leaving Compute closes what holds the GPU, so that takes a second word.
+    if (mode === 'assistant' && serverHolds) {
+      setConfirmKamil(true);
+      return;
+    }
     setChoosing(mode);
     await act(() => api.setGpuMode(connection, mode));
     setChoosing(null);
@@ -137,7 +147,7 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
             <Text>Önceliği bitir</Text>
           </OutlinedButton>
         </>
-      ) : state.mode !== 'compute' && (active.length > 0 || !state.llmActive) ? (
+      ) : state.mode !== 'compute' && !serverHolds && (active.length > 0 || !state.llmActive) ? (
         <Button onClick={() => (gpuJob ? setAsking(true) : void setPriority(true))}>
           <Text>Kamil'i öne al</Text>
         </Button>
@@ -146,7 +156,7 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
       {showModes ? (
         <>
           <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-            AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta GPU işlere kalır, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
+            AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta sunucu açılır ve GPU işlere kalır, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
           </Text>
           <Choices
             value={choosing ?? state.mode}
@@ -159,6 +169,19 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
         </>
       ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {confirmKamil ? (
+        <ConfirmDialog
+          title="Emin misin?"
+          text={`${server?.up ? `${server.name} sunucusu` : 'GPU\'daki sunucu'} açık. AI-Asistan'a geçersen kapanır${server?.busy ? ' ve şu an çalışan işi durur' : ''}, Kamil geri döner.`}
+          confirm="Kapat ve geç"
+          onConfirm={() => {
+            setConfirmKamil(false);
+            setChoosing('assistant');
+            void act(() => api.setGpuMode(connection, 'assistant')).finally(() => setChoosing(null));
+          }}
+          onCancel={() => setConfirmKamil(false)}
+        />
+      ) : null}
       {asking ? (
         <ConfirmDialog
           title="Çalışan iş durdurulsun mu?"

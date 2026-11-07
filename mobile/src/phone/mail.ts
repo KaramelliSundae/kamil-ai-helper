@@ -63,6 +63,7 @@ export async function forgetMail(): Promise<void> {
     for (const item of Object.values(state.items)) if (item.kind === 'mail') delete state.items[item.key];
     state.events = state.events.filter((event) => !event.itemKey.startsWith('mail:') && event.itemKey !== 'system:mail');
     state.meta.mailCursor = state.meta.mailFailures = state.meta.mailError = undefined;
+    if (state.meta.backfilled) state.meta.backfilled.mail = false; // a new account gets its two weeks too
   });
 }
 

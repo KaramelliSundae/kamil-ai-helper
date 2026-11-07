@@ -133,7 +133,7 @@ def mode(settings: Settings, args: argparse.Namespace) -> int:
         return 1
     try:
         if args.mode:
-            httpx.post(f"{url}/mode", json={"mode": args.mode}, timeout=25.0).raise_for_status()
+            httpx.post(f"{url}/mode", json={"mode": args.mode, "confirm": True}, timeout=25.0).raise_for_status()
         print(httpx.get(f"{url}/state", timeout=10.0).json())
     except httpx.HTTPError as error:
         print(f"GPU kapısı: {error}")

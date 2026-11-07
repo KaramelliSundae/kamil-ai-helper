@@ -526,6 +526,23 @@ def test_bad_turn_id_is_refused(client):
     assert client.post("/v1/chat", json={"text": "Selam", "turnId": "../x"}, headers=AUTH).status_code == 422
 
 
+def test_the_mode_switch_passes_the_second_word_and_the_refusal_on(api_settings, sends, monkeypatch):
+    sent = []
+
+    def post(url, json=None, timeout=None):
+        sent.append(json)
+        return httpx.Response(200 if json["confirm"] else 409, json={"reason": "sunucu açık, kapatmak için onayla"})
+
+    monkeypatch.setattr("ai_ders.api.httpx.post", post)
+    monkeypatch.setattr("ai_ders.api.httpx.get", lambda url, timeout=None: httpx.Response(200, json={"mode": "assistant"}))
+    client = gated(api_settings, sends)
+    refused = client.post("/v1/gpu", json={"mode": "assistant", "confirm": False}, headers=AUTH)
+    assert refused.status_code == 409 and "onayla" in refused.text
+    assert client.post("/v1/gpu", json={"mode": "assistant", "confirm": True}, headers=AUTH).json()["mode"] == "assistant"
+    assert client.post("/v1/gpu", json={"mode": "assistant"}, headers=AUTH).status_code == 200  # an app not yet updated
+    assert sent[1] == {"mode": "assistant", "confirm": True} and sent[2]["confirm"] is True
+
+
 def test_kamil_priority_needs_a_gate_and_reports_a_gate_that_is_down(client, api_settings, sends):
     assert client.post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 404
     assert gated(api_settings, sends).post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 503

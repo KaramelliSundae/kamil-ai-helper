@@ -68,6 +68,8 @@ class SendRequest(BaseModel):
 
 class ModeRequest(BaseModel):
     mode: str
+    # The app asks the student before sending this. True by default so an app not yet updated can still leave Compute.
+    confirm: bool = True
 
 
 class SyllabusCheckRequest(BaseModel):
@@ -84,6 +86,8 @@ class ReadAllRequest(BaseModel):
 
 class PriorityRequest(BaseModel):
     on: bool
+
+
 
 
 class GeminiSettingsRequest(BaseModel):
@@ -696,9 +700,11 @@ def create_app(
         if request.mode not in GPU_MODES:
             raise HTTPException(400, "mode must be assistant or compute")
         try:
-            httpx.post(f"{gate}/mode", json={"mode": request.mode}, timeout=25.0).raise_for_status()
+            answer = httpx.post(f"{gate}/mode", json={"mode": request.mode, "confirm": request.confirm}, timeout=25.0)
         except httpx.HTTPError as error:
             raise HTTPException(503, "GPU kapısına ulaşılamıyor") from error
+        if answer.status_code != 200:
+            raise HTTPException(409, answer.json().get("reason") or "mod değiştirilemedi")
         return gpu_state()
 
     # The phone updates itself from here. mobile/publish.sh writes both files, the APK first.

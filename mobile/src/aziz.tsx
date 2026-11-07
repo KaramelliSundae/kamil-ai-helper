@@ -65,7 +65,13 @@ export function report(state: GpuState | null, now: Date): Report {
     line = `Emredersiniz patron. Kamil öncelikte, işleri ${minutes(state.prioritySeconds!)} dakika bekletiyorum.`;
   } else if (state.gpuOwner === 'image') {
     aziz = 'busy';
-    line = `Patron, ${state.imageAppName ?? 'görsel uygulaması'} çalışıyor. O her zaman önce gelir; biter bitmez Kamil'i geri getiririm.`;
+    const name = state.server?.name ?? state.imageAppName ?? 'görsel uygulaması';
+    line = state.server
+      ? `Patron, ${name} sunucusu açık. Siz kapatana kadar açık kalır; Kamil diskte bekliyor, kapanınca hemen döner.`
+      : `Patron, ${name} çalışıyor. Biter bitmez Kamil'i geri getiririm.`;
+  } else if (gpuJob?.server) {
+    aziz = 'busy';
+    line = `Patron, "${gpuJob.label || gpuJob.id}" sunucusu GPU'da açık. Siz kapatana kadar çalışır; Kamil diskte bekliyor.`;
   } else if (state.mode === 'compute') {
     aziz = 'busy';
     line = gpuJob

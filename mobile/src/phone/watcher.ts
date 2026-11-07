@@ -61,6 +61,8 @@ function addEvent(state: PhoneState, event: Omit<EventItem, 'id'>): void {
   state.nextEventId += 1;
 }
 
+const BACKFILL_DAYS = 14;
+
 type Change = { type: 'new' | 'due_changed' | 'graded' | 'updated'; oldDue?: string | null };
 
 function upsert(state: PhoneState, item: CanvasItem & { level?: string }, now: string): Change[] {
@@ -86,6 +88,27 @@ function recordChange(state: PhoneState, item: CanvasItem & { level?: string }, 
     addEvent(state, { ...base, level: 'high', title: `Not girildi: ${label(item)}`, body: `Not: ${item.grade}` });
   } else {
     addEvent(state, { ...base, level: 'high', title: `Güncellendi: ${label(item)}`, body: details(item) });
+  }
+}
+
+/**
+ * The first round only learns what exists, so a new account does not ring for all of it. That left the list empty until
+ * something new came. So the last two weeks go in once per source: read, and without a sound. An install from before this
+ * gets them on its next round.
+ */
+function backfill(state: PhoneState, source: 'canvas' | 'mail', now: Date): void {
+  const done = (state.meta.backfilled ??= {});
+  if (done[source]) return;
+  done[source] = true;
+  const since = now.getTime() - BACKFILL_DAYS * 864e5;
+  const listed = new Set(state.events.map((event) => event.itemKey));
+  const recent = Object.values(state.items)
+    .filter((item) => (item.kind === 'mail') === (source === 'mail') && !listed.has(item.key))
+    .filter((item) => item.postedAt && Date.parse(item.postedAt) >= since)
+    .sort((a, b) => Date.parse(a.postedAt!) - Date.parse(b.postedAt!));
+  for (const item of recent) {
+    recordChange(state, item, { type: 'new' }, now);
+    Object.assign(state.events[state.events.length - 1], { createdAt: item.postedAt, read: true, silent: true });
   }
 }
 
@@ -260,6 +283,7 @@ export async function poll(now = new Date()): Promise<PollResult> {
         }
       }
       state.meta.baselineAt ??= stamp;
+      backfill(state, 'canvas', now);
       state.meta.canvasFailures = 0;
       state.meta.lastError = undefined;
     }
@@ -278,6 +302,7 @@ export async function poll(now = new Date()): Promise<PollResult> {
         }
       }
       state.meta.mailCursor = mail.cursor;
+      backfill(state, 'mail', now);
       state.meta.mailFailures = 0;
       state.meta.mailError = undefined;
     }
