@@ -501,6 +501,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
           tasksEnabled={tasksEnabled}
           onClose={() => setOpen(null)}
           onOpenDrafts={onOpenDrafts}
+          onChanged={() => void refresh()}
         />
       ) : null}
     </Refreshable>

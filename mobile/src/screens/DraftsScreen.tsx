@@ -7,10 +7,12 @@ import {
   LazyColumn,
   LoadingIndicator,
   OutlinedButton,
+  OutlinedTextField,
   Row,
   Text,
   TextButton,
   useMaterialColors,
+  useNativeState,
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useEffect, useState } from 'react';
@@ -34,7 +36,43 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DraftCard({ draft, busy, sendLabel, onSend, onDiscard, onOpenInApp }: {
+/** The student's own edit, phone mode only: a server sends exactly what it stored and checks that by hash. */
+function DraftEditor({ draft, busy, onSave, onCancel }: {
+  draft: Draft;
+  busy: boolean;
+  onSave: (change: { to: string; subject: string; body: string }) => void;
+  onCancel: () => void;
+}) {
+  const toState = useNativeState(draft.to);
+  const subjectState = useNativeState(draft.subject);
+  const bodyState = useNativeState(draft.body);
+  const [to, setTo] = useState(draft.to);
+  const [subject, setSubject] = useState(draft.subject);
+  const [body, setBody] = useState(draft.body);
+  return (
+    <Panel>
+      <OutlinedTextField value={toState} onValueChange={setTo} singleLine keyboardOptions={{ keyboardType: 'email', autoCorrectEnabled: false }} modifiers={[fillMaxWidth()]}>
+        <OutlinedTextField.Label><Text>Kime</Text></OutlinedTextField.Label>
+      </OutlinedTextField>
+      <OutlinedTextField value={subjectState} onValueChange={setSubject} singleLine modifiers={[fillMaxWidth()]}>
+        <OutlinedTextField.Label><Text>Konu</Text></OutlinedTextField.Label>
+      </OutlinedTextField>
+      <OutlinedTextField value={bodyState} onValueChange={setBody} minLines={6} maxLines={16} keyboardOptions={{ capitalization: 'sentences' }} modifiers={[fillMaxWidth()]}>
+        <OutlinedTextField.Label><Text>Metin</Text></OutlinedTextField.Label>
+      </OutlinedTextField>
+      <Row modifiers={[fillMaxWidth()]} horizontalArrangement={{ spacedBy: 10 }}>
+        <OutlinedButton enabled={!busy} onClick={onCancel} modifiers={[weight(1)]}>
+          <Text>Vazgeç</Text>
+        </OutlinedButton>
+        <Button enabled={!busy && !!to.trim() && !!body.trim()} onClick={() => onSave({ to, subject, body })} modifiers={[weight(1)]}>
+          <Text>Kaydet</Text>
+        </Button>
+      </Row>
+    </Panel>
+  );
+}
+
+function DraftCard({ draft, busy, sendLabel, onSend, onDiscard, onOpenInApp, onEdit }: {
   draft: Draft;
   busy: boolean;
   sendLabel: string;
@@ -42,6 +80,7 @@ function DraftCard({ draft, busy, sendLabel, onSend, onDiscard, onOpenInApp }: {
   onDiscard: () => void;
   /** Phone mode: send it from the mail app instead, or edit it there first. */
   onOpenInApp?: () => void;
+  onEdit?: () => void;
 }) {
   const colors = useMaterialColors();
   return (
@@ -77,6 +116,11 @@ function DraftCard({ draft, busy, sendLabel, onSend, onDiscard, onOpenInApp }: {
           <Text modifiers={[paddingAll(4)]}>{sendLabel}</Text>
         </Button>
       </Row>
+      {onEdit ? (
+        <TextButton enabled={!busy} onClick={onEdit}>
+          <Text>Düzenle</Text>
+        </TextButton>
+      ) : null}
       {onOpenInApp ? (
         <TextButton enabled={!busy} onClick={onOpenInApp}>
           <Text>Mail uygulamasında aç</Text>
@@ -93,6 +137,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Draft | null>(null);
   const [canSend, setCanSend] = useState(connection.mode !== 'phone');
+  const [editing, setEditing] = useState<string | null>(null);
 
   useEffect(() => {
     api.canSendMail(connection).then(setCanSend, () => setCanSend(false));
@@ -115,17 +160,28 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
   );
 
   const renderDraft = useCallback(
-    ({ item }: { item: Draft }) => (
+    ({ item }: { item: Draft }) => editing === item.id ? (
+      <DraftEditor
+        draft={item}
+        busy={busy}
+        onCancel={() => setEditing(null)}
+        onSave={(change) => {
+          setEditing(null);
+          void act(() => api.updateDraft(item, change));
+        }}
+      />
+    ) : (
       <DraftCard
         draft={item}
         busy={busy}
         sendLabel={canSend ? 'Gönder' : 'Mailde aç'}
         onSend={() => setConfirming(item)}
         onOpenInApp={connection.mode === 'phone' && canSend ? () => void act(() => api.openDraftInMailApp(item)) : undefined}
+        onEdit={connection.mode === 'phone' ? () => setEditing(item.id) : undefined}
         onDiscard={() => void act(() => api.discardDraft(connection, item))}
       />
     ),
-    [act, busy, canSend, connection],
+    [act, busy, canSend, connection, editing],
   );
 
   return (

@@ -38,7 +38,7 @@ import { LinkDialog, MailBody } from './MailBody';
 import { loadMailImage } from './mailImages';
 import { hostOf, linkRisk, LinkRisk, splitSender } from './mailText';
 import { TaskPicker } from './TaskPicker';
-import { replyLink } from './mailThread';
+import { ReplyComposer } from './ReplyComposer';
 import { Notice, rounded, shapes } from './ui';
 
 /** What the list already knows, shown until the full record arrives (and kept when there is none). */
@@ -58,7 +58,7 @@ const UNREADABLE = '(açılamayan mail)';
 const SHEET_GUTTER = 20;
 const CARD_PADDING = 20;
 
-export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose, onOpenDrafts }: {
+export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose, onOpenDrafts, onChanged }: {
   connection: Connection;
   target: DetailTarget;
   tasksEnabled?: boolean;
@@ -66,11 +66,13 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   onClose: () => void;
   /** Where a reply draft waits for approval. */
   onOpenDrafts?: () => void;
+  /** A reply went out: the list has something new. */
+  onChanged?: () => void;
 }) {
   const colors = useMaterialColors();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   const [earlier, setEarlier] = useState<ItemDetail[]>([]);
-  const [drafting, setDrafting] = useState(false);
+  const [replying, setReplying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [taskAdded, setTaskAdded] = useState(!!inTasks);
@@ -116,20 +118,6 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
       live = false;
     };
   }, [connection, earlierKeys]);
-
-  const draftReply = async () => {
-    setError(null);
-    setDrafting(true);
-    try {
-      await api.replyDraft(connection, target.key);
-      onClose();
-      onOpenDrafts?.();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Taslak yazılamadı.');
-    } finally {
-      setDrafting(false);
-    }
-  };
 
   const kind = detail?.kind ?? (target.key.startsWith('mail:') ? 'mail' : undefined);
   const mail = kind === 'mail';
@@ -225,6 +213,24 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
 
         {error ? <Notice tone="error">{error}</Notice> : null}
         {note ? <Notice>{note}</Notice> : null}
+        {replying && detail?.replyTo ? (
+          <ReplyComposer
+            connection={connection}
+            itemKey={target.key}
+            title={detail.title}
+            to={detail.replyTo}
+            onSent={() => {
+              setReplying(false);
+              setNote('Mail gönderildi.');
+              onChanged?.();
+            }}
+            onSaved={() => {
+              onClose();
+              onOpenDrafts?.();
+            }}
+            onCancel={() => setReplying(false)}
+          />
+        ) : null}
         {picking ? (
           <TaskPicker
             connection={connection}
@@ -242,21 +248,11 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           />
         ) : null}
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {mail && detail && replyLink(detail.replyTo, detail.title) ? (
-            <Button
-              onClick={() => {
-                setError(null);
-                Linking.openURL(replyLink(detail.replyTo, detail.title)!).catch(() => setError('Mail uygulaması açılamadı.'));
-              }}>
+          {mail && detail?.replyTo && connection.mode === 'phone' && !replying ? (
+            <Button onClick={() => { setNote(null); setReplying(true); }}>
               <Icon source={icons.mail} size={18} />
               <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
             </Button>
-          ) : null}
-          {mail && detail?.replyTo && connection.mode === 'phone' && onOpenDrafts ? (
-            <FilledTonalButton enabled={!drafting} onClick={() => void draftReply()}>
-              <Icon source={icons.newChat} size={18} />
-              <Text modifiers={[paddingAll(4)]}>{drafting ? 'Taslak yazılıyor…' : 'Taslak oluştur'}</Text>
-            </FilledTonalButton>
           ) : null}
           {(work && tasksEnabled || remindable) && taskAdded ? (
             <OutlinedButton onClick={() => setConfirmRemove(true)}>

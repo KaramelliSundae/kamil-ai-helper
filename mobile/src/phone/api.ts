@@ -16,7 +16,7 @@ import { writeReply } from './reply';
 import { recipients, sendMail, SmtpError } from './smtp';
 import { suggestTasks } from './suggest';
 import { addTask, keepTask, localDay, outdatedTasks, removeTask, updateTask } from './tasks';
-import { readState, updateState } from './store';
+import { readState, StoredDraft, updateState } from './store';
 import { poll } from './watcher';
 
 const UPCOMING_DAYS = 14;
@@ -33,6 +33,12 @@ async function freshState() {
   if (Date.now() - last < STALE_MS) return state;
   await poll().catch(() => undefined);
   return readState();
+}
+
+const BLANKS = 'Köşeli parantezli yerleri doldurmadan gönderme.';
+
+function blankWarning(body: string): string[] {
+  return /\[[^\]\n]{1,80}\]/.test(body) ? [BLANKS] : [];
 }
 
 function mailto(draft: Draft): string {
@@ -217,38 +223,74 @@ export const phoneApi = {
     }
   },
 
-  /** Written from the whole conversation, addressed from the mail's own headers. It waits in Onaylar. */
-  async replyDraft(key: string): Promise<void> {
+  /** Text for a reply, from the whole conversation, when the student taps for it. It only fills the box: nothing is saved or sent. */
+  async replyText(key: string): Promise<string> {
     const [state, settings, mail] = await Promise.all([readState(), loadPhoneSettings(), loadMailSettings()]);
     const row = state.items[key];
-    if (!row || row.kind !== 'mail' || !row.replyTo) throw new ApiError('Bu maile yanıt adresi bulunamadı', 404);
+    if (!row || row.kind !== 'mail') throw new ApiError('Mail bulunamadı', 404);
     const config = cloudConfig(settings);
-    if (!config) throw new ApiError("Model bağlı değil. Yanıtla ile kendin yazabilirsin.", 409);
-    if (!mail.toGemini) throw new ApiError("Mailler bulut modele kapalı. Ayarlar'dan açabilir veya Yanıtla ile kendin yazabilirsin.", 409);
+    if (!config) throw new ApiError('Model bağlı değil, yanıtı kendin yazabilirsin.', 409);
+    if (!mail.toGemini) throw new ApiError("Mailler bulut modele kapalı. Ayarlar'dan açabilir veya yanıtı kendin yazabilirsin.", 409);
     const thread = Object.values(state.items)
       .filter((item) => item.kind === 'mail' && item.thread && item.thread === row.thread)
       .sort((a, b) => (a.postedAt ?? '').localeCompare(b.postedAt ?? ''));
     let body: string;
     try {
-      body = await writeReply(cloudModel(config, 'Mail taslağı').chat, thread.length ? thread : [row], state.meta.firstName);
+      body = await writeReply(cloudModel(config, 'Mail yanıtı').chat, thread.length ? thread : [row], state.meta.firstName);
     } catch (error) {
-      throw new ApiError(error instanceof Error ? error.message : 'Taslak yazılamadı.', 503);
+      throw new ApiError(error instanceof Error ? error.message : 'Yanıt yazılamadı.', 503);
     }
     if (!body) throw new ApiError('Model boş yanıt verdi, tekrar dene.', 503);
-    const blanks = /\[[^\]\n]{1,80}\]/.test(body);
+    return body;
+  },
+
+  /** A reply as the student wrote it, waiting in Onaylar. */
+  async saveReply(key: string, to: string, body: string): Promise<Draft> {
+    const state = await readState();
+    const row = state.items[key];
+    if (!row || row.kind !== 'mail') throw new ApiError('Mail bulunamadı', 404);
+    const draft: StoredDraft = {
+      id: `${Date.now().toString(36)}${Math.floor(Math.random() * 2 ** 32).toString(16)}`,
+      to: to.trim().slice(0, 300),
+      subject: (/^\s*re\s*:/i.test(row.title) ? row.title : `Re: ${row.title}`).slice(0, 300),
+      body: body.slice(0, 20000),
+      createdAt: new Date().toISOString(),
+      warnings: blankWarning(body),
+      status: 'pending',
+      thread: row.thread,
+      inReplyTo: row.messageId || undefined,
+      references: row.references || undefined,
+    };
     await updateState((saved) => {
-      saved.drafts.push({
-        id: `${Date.now().toString(36)}${Math.floor(Math.random() * 2 ** 32).toString(16)}`,
-        to: row.replyTo!.slice(0, 300),
-        subject: (/^\s*re\s*:/i.test(row.title) ? row.title : `Re: ${row.title}`).slice(0, 300),
-        body,
-        createdAt: new Date().toISOString(),
-        warnings: blanks ? ['Köşeli parantezli yerleri doldurmadan gönderme: Mail uygulamasında aç ile düzenleyebilirsin.'] : [],
-        status: 'pending',
-        thread: row.thread,
-        inReplyTo: row.messageId || undefined,
-        references: row.references || undefined,
+      saved.drafts.push(draft);
+    });
+    return { id: draft.id, to: draft.to, subject: draft.subject, body: draft.body, hash: draft.id, createdAt: draft.createdAt, warnings: draft.warnings };
+  },
+
+  /** Sent straight from the box, after the student confirmed. If it fails nothing stays behind: the text is still in the box. */
+  async sendReply(key: string, to: string, body: string): Promise<{ status: string }> {
+    const draft = await phoneApi.saveReply(key, to, body);
+    try {
+      return await phoneApi.sendDraft(draft);
+    } catch (error) {
+      await updateState((saved) => {
+        const row = saved.drafts.find((d) => d.id === draft.id);
+        if (row) row.status = 'discarded';
       });
+      throw error;
+    }
+  },
+
+  /** The student's own edit. What was warned about the text is looked at again; what was warned about its origin stays. */
+  async updateDraft(draft: Draft, change: { to: string; subject: string; body: string }): Promise<void> {
+    await approved(draft);
+    await updateState((saved) => {
+      const row = saved.drafts.find((d) => d.id === draft.id);
+      if (!row) return;
+      row.to = change.to.trim().slice(0, 300);
+      row.subject = change.subject.replace(/[\r\n]+/g, ' ').trim().slice(0, 300);
+      row.body = change.body.slice(0, 20000);
+      row.warnings = [...row.warnings.filter((warning) => warning !== BLANKS), ...blankWarning(row.body)];
     });
   },
 

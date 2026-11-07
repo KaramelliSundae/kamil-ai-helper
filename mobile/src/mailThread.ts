@@ -54,8 +54,8 @@ export function collapseThreads(events: EventItem[], arrived: (event: EventItem)
 }
 
 /** A reply in the student's own mail app. Only a plain address goes in: a mail cannot add recipients or text this way. */
-export function replyLink(to: string | undefined, subject: string): string | null {
+export function replyLink(to: string | undefined, subject: string, body = ''): string | null {
   if (!to || !MAIL_ADDRESS.test(to.trim())) return null;
   const title = /^\s*re\s*:/i.test(subject) ? subject : `Re: ${subject}`;
-  return `mailto:${to.trim()}?subject=${encodeURIComponent(title)}`;
+  return `mailto:${to.trim()}?subject=${encodeURIComponent(title)}${body ? `&body=${encodeURIComponent(body)}` : ''}`;
 }

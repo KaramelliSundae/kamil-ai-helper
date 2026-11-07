@@ -149,8 +149,11 @@ export const api = {
     c.mode === 'phone'
       ? phoneApi.keepTask(key)
       : request<{ status: string }>(c, '/v1/tasks/keep', 'POST', { key }),
-  replyDraft: (c: Connection, key: string) =>
-    c.mode === 'phone' ? phoneApi.replyDraft(key) : Promise.reject(new ApiError('Bu özellik şimdilik yalnızca telefon modunda', 404)),
+  // Replying from inside the app is phone mode only for now: only there does a mail know its address.
+  replyText: (key: string) => phoneApi.replyText(key),
+  saveReply: (key: string, to: string, body: string) => phoneApi.saveReply(key, to, body),
+  sendReply: (key: string, to: string, body: string) => phoneApi.sendReply(key, to, body),
+  updateDraft: (draft: Draft, change: { to: string; subject: string; body: string }) => phoneApi.updateDraft(draft, change),
   suggestTask: (c: Connection, key: string) =>
     c.mode === 'phone'
       ? phoneApi.suggestTask(key)
