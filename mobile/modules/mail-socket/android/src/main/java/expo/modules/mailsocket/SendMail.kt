@@ -16,6 +16,7 @@ import jakarta.mail.internet.MimeMessage
 import java.util.Date
 import java.util.Properties
 import java.util.UUID
+import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLException
 
@@ -54,6 +55,9 @@ private fun session(host: String, port: Int, implicitTls: Boolean): Session {
     // The machine's own name stays out of the greeting.
     put("$key.localhost", "kamil")
     put("$key.ssl.checkserveridentity", "true")
+    // Not enough on Android: Angus asks for the LDAPS check, and a mail went to a server with another name's certificate in testing.
+    // So Android's own strict verifier is named outright, the same one the reading side uses.
+    put("$key.ssl.hostnameverifier", HttpsURLConnection.getDefaultHostnameVerifier())
     // Asking for what this Android does not have would fail the whole connection: TLS 1.3 starts at Android 10.
     put("$key.ssl.protocols", SSLContext.getDefault().supportedSSLParameters.protocols.filter { it == "TLSv1.3" || it == "TLSv1.2" }.joinToString(" "))
     if (!implicitTls) {

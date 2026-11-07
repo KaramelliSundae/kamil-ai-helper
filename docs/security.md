@@ -91,7 +91,7 @@ untrusted input, hold private data, and change lasting state all at once.
 - **Drafts.** Kamil cannot send mail. A draft gets a visible warning when its recipient is outside your
   school, when the address was neither typed by you nor the sender of a stored message, or when you never
   asked for a mail. On the server a draft goes out only after you approve it in the app, and only if it is
-  exactly what you saw (hash check). In phone-only mode it goes from the phone after you tap send, with Eclipse Angus Mail, TLS required and the server's name checked, and with no way to reach it from the model, or opens in your mail app if you choose.
+  exactly what you saw (hash check). In phone-only mode it goes from the phone after you tap send, with Eclipse Angus Mail, TLS required and the server's name checked by Android's own verifier, and with no way to reach it from the model, or opens in your mail app if you choose.
 - **No dangerous tools.** There is no shell, no web access and no Canvas write. The tool list is closed and
   tested.
 - **Output stays inert.** The chat renders no links or images, so an answer cannot leak data without a tap.
