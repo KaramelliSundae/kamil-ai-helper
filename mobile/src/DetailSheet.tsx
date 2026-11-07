@@ -174,6 +174,35 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           </Text>
         </Column>
 
+        {/* Up here as well: a long conversation would otherwise push it far down. */}
+        {mail && detail?.replyTo && connection.mode === 'phone' && !replying ? (
+          <Button onClick={() => { setNote(null); setReplying(true); }}>
+            <Icon source={icons.mail} size={18} />
+            <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
+          </Button>
+        ) : null}
+
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {note ? <Notice>{note}</Notice> : null}
+        {replying && detail?.replyTo ? (
+          <ReplyComposer
+            connection={connection}
+            itemKey={target.key}
+            title={detail.title}
+            to={detail.replyTo}
+            onSent={(sentCopy) => {
+              setReplying(false);
+              setNote(sentCopy ? 'Mail gönderildi, kopyası Gönderilmiş klasöründe.' : "Mail gönderildi, ama Gönderilmiş klasörüne kopya bırakılamadı. Yalnızca Kamil'de görünür.");
+              onChanged?.();
+            }}
+            onSaved={() => {
+              onClose();
+              onOpenDrafts?.();
+            }}
+            onCancel={() => setReplying(false)}
+          />
+        ) : null}
+
         {earlier.map((message) => (
           <Column key={message.key} verticalArrangement={{ spacedBy: 8 }} modifiers={[fillMaxWidth()]}>
             <SenderRow sender={message.sender} when={message.postedAt} />
@@ -211,26 +240,6 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
 
         {files.length ? <Attachments connection={connection} files={files} /> : null}
 
-        {error ? <Notice tone="error">{error}</Notice> : null}
-        {note ? <Notice>{note}</Notice> : null}
-        {replying && detail?.replyTo ? (
-          <ReplyComposer
-            connection={connection}
-            itemKey={target.key}
-            title={detail.title}
-            to={detail.replyTo}
-            onSent={(sentCopy) => {
-              setReplying(false);
-              setNote(sentCopy ? 'Mail gönderildi, kopyası Gönderilmiş klasöründe.' : "Mail gönderildi, ama Gönderilmiş klasörüne kopya bırakılamadı. Yalnızca Kamil'de görünür.");
-              onChanged?.();
-            }}
-            onSaved={() => {
-              onClose();
-              onOpenDrafts?.();
-            }}
-            onCancel={() => setReplying(false)}
-          />
-        ) : null}
         {picking ? (
           <TaskPicker
             connection={connection}
@@ -248,12 +257,6 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           />
         ) : null}
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {mail && detail?.replyTo && connection.mode === 'phone' && !replying ? (
-            <Button onClick={() => { setNote(null); setReplying(true); }}>
-              <Icon source={icons.mail} size={18} />
-              <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
-            </Button>
-          ) : null}
           {(work && tasksEnabled || remindable) && taskAdded ? (
             <OutlinedButton onClick={() => setConfirmRemove(true)}>
               <Icon source={icons.taskDone} size={18} />

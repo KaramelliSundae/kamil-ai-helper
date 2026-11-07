@@ -24,7 +24,7 @@ export type MailText = {
 const URL = /\bhttps?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g;
 const SEPARATOR = /^[\s\-_=*.·•~–—+#]{3,}$/;
 const BULLET = /^\s*(?:[-•*·▪●◦]|\d{1,2}[.)])\s+/;
-const QUOTE_START = /(?:wrote|yazdı)\s*:\s*$|^-{2,}\s*(?:Original Message|Orijinal Mesaj|Forwarded message|İletilen mesaj)/i;
+const QUOTE_START = /(?:wrote|yazdı)\s*:\s*$|^-{2,}\s*(?:Original Message|Orijinal Mesaj|Forwarded message|İletilen mesaj)|^(?:Bu e-?posta mesaj[ıi]|Bu e-?posta ve ekleri|Yasal uyar[ıi]|This (?:e-?mail|message)(?: and any attachments?)? (?:is|are|may)|Disclaimer\b|Confidentiality notice)/i;
 const TURKISH = /[çğıöşüÇĞİÖŞÜ]/g;
 const ENGLISH_WORDS = /\b(?:the|and|of|to|you|your|we|our|is|are|will|for|dear)\b/gi;
 const GENERIC_CAPTION = /^(?:link|links|bağlantı|bağlantılar|url|adres|web|website|web sitesi)$/i;
