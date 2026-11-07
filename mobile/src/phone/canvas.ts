@@ -105,6 +105,11 @@ export function frontPage(creds: Creds, courseId: number): Promise<string> {
   return optional(async () => (await get(creds, `${creds.url.replace(/\/+$/, '')}/api/v1/courses/${courseId}/front_page`)).body?.body ?? '', '');
 }
 
+/** One file by its number, wherever it was linked from. */
+export function courseFile(creds: Creds, courseId: number, fileId: number): Promise<Row | null> {
+  return optional(async () => (await get(creds, `${creds.url.replace(/\/+$/, '')}/api/v1/courses/${courseId}/files/${fileId}`)).body ?? null, null);
+}
+
 export function courseFiles(creds: Creds, courseId: number, search: string): Promise<Row[]> {
   return optional(() => list(creds, `/api/v1/courses/${courseId}/files`, { search_term: search }), []);
 }

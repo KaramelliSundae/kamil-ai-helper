@@ -40,8 +40,6 @@ const FALLBACK_SETUP: ChatSetup = { firstName: null, models: [{ id: 'local', nam
 const NO_MODEL = { id: 'gemini' as ModelId, name: 'Kamil', detail: '' };
 
 /** Opens a fresh chat with a prepared question, for example from an assignment's details. */
-export type ChatIntent = { text: string; model: ModelId };
-
 /** The model writes light Markdown: bullets become "•" and **bold** becomes bold. Nothing else is parsed. */
 export function markdownSpans(content: string): { text: string; bold: boolean }[] {
   const text = content.replace(/^[ \t]*[*-][ \t]+/gm, '• ');
@@ -175,11 +173,7 @@ function HistorySheet({ connection, current, onPick, onNew, onClose }: {
   );
 }
 
-export function ChatScreen({ connection, intent, onIntentUsed }: {
-  connection: Connection;
-  intent: ChatIntent | null;
-  onIntentUsed: () => void;
-}) {
+export function ChatScreen({ connection }: { connection: Connection }) {
   const colors = useMaterialColors();
   const insets = useSafeAreaInsets();
   const session = useChat();
@@ -223,14 +217,6 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
     setHistoryOpen(false);
   }, []);
 
-  useEffect(() => {
-    if (!intent) return;
-    chat.startNew();
-    chat.setModel(intent.model);
-    chat.setDraft(intent.text);
-    onIntentUsed();
-  }, [intent, onIntentUsed]);
-
   const openConversation = useCallback(
     (id: number) => {
       setHistoryOpen(false);
@@ -240,7 +226,7 @@ export function ChatScreen({ connection, intent, onIntentUsed }: {
   );
 
   useEffect(() => {
-    if (!intent) void chat.refresh(connection);
+    void chat.refresh(connection);
     // Only on mount: later changes come from the user.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

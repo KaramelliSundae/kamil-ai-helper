@@ -63,6 +63,7 @@ export const phoneApi = {
         .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
         .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
         .map(([key, exam]) => ({ ...exam, key, inTasks: !!state.meta.gtasks?.[key] })),
+      examsScanning: !state.meta.firstScanDone,
       examsMissing: Object.values(state.examCourses ?? {})
         .filter((row) => !row.hasSyllabus && !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course))
         .map((row) => ({ course: row.course, hint: row.hint })),

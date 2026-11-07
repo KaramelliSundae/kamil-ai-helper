@@ -62,6 +62,9 @@ export type PhoneState = {
   meta: {
     baselineAt?: string;
     examsBaselineAt?: string;
+    /** The one read of every course's syllabus, after connecting. */
+    firstScanStartedAt?: string;
+    firstScanDone?: boolean;
     lastPollAt?: string;
     lastError?: string;
     canvasFailures?: number;

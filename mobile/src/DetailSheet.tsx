@@ -1,6 +1,5 @@
 import {
   Box,
-  Button,
   Column,
   FilledTonalButton,
   FlowRow,
@@ -57,14 +56,12 @@ const UNREADABLE = '(açılamayan mail)';
 const SHEET_GUTTER = 20;
 const CARD_PADDING = 20;
 
-export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose, onSolve }: {
+export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose }: {
   connection: Connection;
   target: DetailTarget;
   tasksEnabled?: boolean;
   inTasks?: boolean;
   onClose: () => void;
-  /** Present when Gemini is connected. */
-  onSolve?: (detail: ItemDetail) => void;
 }) {
   const colors = useMaterialColors();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
@@ -201,12 +198,6 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           />
         ) : null}
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
-          {work && detail && onSolve ? (
-            <Button onClick={() => onSolve(detail)}>
-              <Icon source={icons.cloud} size={18} />
-              <Text modifiers={[paddingAll(4)]}>Yapay zekayla çöz</Text>
-            </Button>
-          ) : null}
           {(work && tasksEnabled || remindable) && taskAdded ? (
             <OutlinedButton onClick={() => setConfirmRemove(true)}>
               <Icon source={icons.taskDone} size={18} />

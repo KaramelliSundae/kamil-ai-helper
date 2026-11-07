@@ -115,7 +115,7 @@ export async function checkEvents(): Promise<number> {
   const connection = await loadConnection();
   if (!connection) return 0;
   if (connection.mode === 'phone') {
-    await poll().catch(() => undefined);
+    await poll(undefined, true).catch(() => undefined);
     await phoneDigest().catch(() => undefined);
   }
   const events = await api.events(connection);

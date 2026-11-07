@@ -7,7 +7,7 @@ import * as Notifications from 'expo-notifications';
 
 import type { EventItem } from '../types';
 import { activeCourses, CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
-import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, TRUST } from './exams';
+import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, ScanLater, TRUST } from './exams';
 import { ImapAuthError, MailItem, mailProblem, readNewMail } from './mail';
 import { loadMailSettings, loadPhoneSettings, PhoneSettings } from './settings';
 import { PhoneState, readState, StoredItem, updateState } from './store';
@@ -206,43 +206,88 @@ function recordExams(state: PhoneState, course: string, found: FoundExam[], now:
   }
 }
 
-/** Announcements every round. Syllabi a course or two at a time, and only until a course's syllabus has been found. */
-async function scanExams(settings: PhoneSettings, items: CanvasItem[], now: Date): Promise<void> {
-  const creds = { url: settings.canvasUrl, token: settings.canvasToken };
+/** What announcements say, every round. Quick: nothing here calls a model. */
+async function examsFromItems(items: CanvasItem[], now: Date): Promise<void> {
   const known = (await readState()).examCourses ?? {};
   const starts: Record<string, Date> = {};
   for (const row of Object.values(known)) {
     if (row.termStart) starts[row.course] = new Date(`${row.termStart}T00:00:00`);
   }
   const fromItems = examsInItems(items, now, starts);
-  const every = settings.syllabusCheckDays;
-  const scans: { id: number; course: string; scan: CourseScan }[] = [];
-  if (every) {
-    const courses = await activeCourses(creds);
-    const gemini = settings.geminiKey && settings.provider === 'gemini' ? { key: settings.geminiKey, model: settings.geminiModel } : null;
-    for (const [id, course] of courses) {
-      if (scans.length >= COURSES_PER_ROUND) break;
-      const row = known[String(id)];
-      if (row && (row.hasSyllabus || now.getTime() - Date.parse(row.checkedAt) < every * 86400000)) continue;
-      scans.push({ id, course, scan: await scanCourse(creds, id, now, gemini) });
-    }
-  }
   await updateState((state) => {
     const quiet = !state.meta.examsBaselineAt;
     for (const [course, found] of Object.entries(fromItems)) recordExams(state, course, bestExams(found, now), now, quiet);
-    state.examCourses ??= {};
-    for (const { id, course, scan } of scans) {
-      state.examCourses[String(id)] = { course, termStart: scan.termStart, hasSyllabus: scan.hasSyllabus, checkedAt: now.toISOString(), hint: scan.hint, attendance: scan.attendance };
-      recordExams(state, course, scan.found, now, quiet);
-    }
-    if (!scans.length) state.meta.examsBaselineAt ??= now.toISOString();
   });
+}
+
+let readingSyllabi = false;
+
+/**
+ * Syllabi. The first time every course is read once, whatever the setting, each saved as it is done so a closed app loses
+ * little. After that only a course with no syllabus yet, as often as the setting says. A course read before this pass
+ * counts as not read, so an install that gave up on one gets it again. Gemini's limit ends the pass, and the next round
+ * goes on from there.
+ */
+async function readSyllabi(settings: PhoneSettings, now: Date, most: number): Promise<void> {
+  if (readingSyllabi) return;
+  readingSyllabi = true;
+  try {
+    const creds = { url: settings.canvasUrl, token: settings.canvasToken };
+    const every = settings.syllabusCheckDays;
+    const gemini = settings.geminiKey && settings.provider === 'gemini' ? { key: settings.geminiKey, model: settings.geminiModel } : null;
+    const started = await updateState((state) => {
+      state.meta.firstScanStartedAt ??= now.toISOString();
+      return state.meta;
+    });
+    const firstPass = !started.firstScanDone;
+    if (!firstPass && !every) return;
+    const passStart = Date.parse(started.firstScanStartedAt!);
+    let done = 0;
+    let finished = true;
+    for (const [id, course] of await activeCourses(creds)) {
+      const row = (await readState()).examCourses?.[String(id)];
+      const waits = firstPass
+        ? row && (row.hasSyllabus || Date.parse(row.checkedAt) >= passStart)
+        : row && (row.hasSyllabus || now.getTime() - Date.parse(row.checkedAt) < every * 86400000);
+      if (waits) continue;
+      if (done >= most) {
+        finished = false;
+        break;
+      }
+      let scan: CourseScan;
+      try {
+        scan = await scanCourse(creds, id, now, gemini);
+      } catch (error) {
+        if (error instanceof ScanLater) {
+          finished = false;
+          break;
+        }
+        continue;
+      }
+      done += 1;
+      await updateState((state) => {
+        state.examCourses ??= {};
+        state.examCourses[String(id)] = {
+          course, termStart: scan.termStart, hasSyllabus: scan.hasSyllabus, checkedAt: new Date().toISOString(), hint: scan.hint, attendance: scan.attendance,
+        };
+        recordExams(state, course, scan.found, now, !state.meta.examsBaselineAt);
+      });
+    }
+    if (finished) {
+      await updateState((state) => {
+        state.meta.firstScanDone = true;
+        state.meta.examsBaselineAt ??= now.toISOString();
+      });
+    }
+  } finally {
+    readingSyllabi = false;
+  }
 }
 
 export type PollResult = { items: number; events: number; error: string | null };
 
 /** One round: Canvas, then changes, reminders and alarms. The first round only learns what exists. */
-export async function poll(now = new Date()): Promise<PollResult> {
+export async function poll(now = new Date(), background = false): Promise<PollResult> {
   const settings = await loadPhoneSettings();
   if (!settings.canvasUrl || !settings.canvasToken) return { items: 0, events: 0, error: 'Canvas ayarlı değil' };
   let items: CanvasItem[] = [];
@@ -315,6 +360,14 @@ export async function poll(now = new Date()): Promise<PollResult> {
       error: failure ? state.meta.lastError ?? 'Canvas okunamadı' : null,
     };
   });
-  if (!failure) await scanExams(settings, items, now).catch(() => undefined); // exam dates can always wait for the next round
+  if (!failure) {
+    await examsFromItems(items, now).catch(() => undefined); // exam dates can always wait for the next round
+    if (background) {
+      await readSyllabi(settings, now, COURSES_PER_ROUND).catch(() => undefined); // a background round has little time
+    } else {
+      // Nobody waits for this: it takes minutes on a first connection. The Today screen says it is going on.
+      void readSyllabi(settings, now, Number.POSITIVE_INFINITY).catch(() => undefined);
+    }
+  }
   return result;
 }

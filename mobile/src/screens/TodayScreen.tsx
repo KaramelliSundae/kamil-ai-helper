@@ -18,7 +18,7 @@ import type { BuiltinShape } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useMemo, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
-import { api, Connection, Exam, GpuState, ItemDetail, Upcoming } from '../api';
+import { api, Connection, Exam, GpuState, Upcoming } from '../api';
 import { courseIcon } from '../courseIcon';
 import { DetailSheet } from '../DetailSheet';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -195,10 +195,9 @@ function Summary({ upcoming, gpu, now }: { upcoming: Upcoming[]; gpu: GpuState; 
   );
 }
 
-export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
+export function TodayScreen({ connection, onOpenDrafts }: {
   connection: Connection;
   onOpenDrafts: () => void;
-  onSolve?: (detail: ItemDetail) => void;
 }) {
   const colors = useMaterialColors();
   const load = useCallback(() => api.today(connection), [connection]);
@@ -334,7 +333,10 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
             {data.upcoming.length ? 'Önümüzdeki 14 gün' : 'Önümüzdeki 14 günde teslim yok.'}
           </Text>
         ) : null}
-        {tab === 'exams' && data && !exams.length && !missing.length ? (
+        {tab === 'exams' && data?.examsScanning ? (
+          <Notice>Derslerinin syllabus'larını okuyorum, birkaç dakika sürebilir. Buldukça burada çıkacak.</Notice>
+        ) : null}
+        {tab === 'exams' && data && !data.examsScanning && !exams.length && !missing.length ? (
           <Notice>Henüz sınav tarihi bulamadım. Duyuruları ve syllabus'ları taramaya devam ediyorum.</Notice>
         ) : null}
         {tab === 'work' ? (
@@ -385,7 +387,6 @@ export function TodayScreen({ connection, onOpenDrafts, onSolve }: {
             setOpen(null);
             void refresh();
           }}
-          onSolve={onSolve}
         />
       ) : null}
     </Refreshable>

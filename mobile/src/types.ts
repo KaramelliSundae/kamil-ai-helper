@@ -71,6 +71,8 @@ export type Today = {
   /** Older servers send neither of these. */
   exams?: Exam[];
   examsMissing?: { course: string; hint: string }[];
+  /** The first read of every course's syllabus is still going on. */
+  examsScanning?: boolean;
   /** Tasks whose item or exam has moved since they were added. Nothing changes until the student agrees. */
   tasksOutdated?: { key: string; title: string; from: string; to: string }[];
 };

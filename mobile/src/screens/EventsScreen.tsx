@@ -21,7 +21,7 @@ import {
 import { fillMaxSize, fillMaxWidth, height, onSizeChanged, padding, paddingAll, Shapes, weight, width } from '@expo/ui/jetpack-compose/modifiers';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { api, Connection, EventItem, EventSource, ItemDetail } from '../api';
+import { api, Connection, EventItem, EventSource } from '../api';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { courseIcon } from '../courseIcon';
 import { DetailSheet } from '../DetailSheet';
@@ -243,12 +243,11 @@ function CoursePicker({ courses, course, onChange }: {
   );
 }
 
-export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
+export function EventsScreen({ connection, openEventId, onOpened }: {
   connection: Connection;
   /** A tapped phone notification: its details open as soon as the list has it. */
   openEventId: number | null;
   onOpened: () => void;
-  onSolve?: (detail: ItemDetail) => void;
 }) {
   const colors = useMaterialColors();
   const load = useCallback(() => api.events(connection), [connection]);
@@ -482,7 +481,6 @@ export function EventsScreen({ connection, openEventId, onOpened, onSolve }: {
           target={{ key: open.itemKey, title: shown?.title ?? open.title, body: shown?.body ?? open.body, url: open.url, when: open.createdAt }}
           tasksEnabled={tasksEnabled}
           onClose={() => setOpen(null)}
-          onSolve={onSolve}
         />
       ) : null}
     </Refreshable>

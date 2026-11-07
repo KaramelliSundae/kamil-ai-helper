@@ -16,11 +16,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppState, Keyboard } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { api, Connection, ItemDetail, loadConnection } from './src/api';
+import { api, Connection, loadConnection } from './src/api';
 import { checkEvents, startBackgroundChecks } from './src/background';
 import { setAppConfig } from './src/config';
 import { icons } from './src/icons';
-import { ChatIntent, ChatScreen } from './src/screens/ChatScreen';
+import { ChatScreen } from './src/screens/ChatScreen';
 import { DraftsScreen } from './src/screens/DraftsScreen';
 import { EventsScreen } from './src/screens/EventsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
@@ -56,29 +56,15 @@ function Shell() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<TabId>('today');
   const [openEventId, setOpenEventId] = useState<number | null>(null);
-  const [chatIntent, setChatIntent] = useState<ChatIntent | null>(null);
-  const [geminiReady, setGeminiReady] = useState(false);
 
   useEffect(() => {
     if (!connection) return;
     api.chatSetup(connection).then(
-      (setup) => {
-        setGeminiReady(setup.models.some((model) => model.id === 'gemini'));
-        setAppConfig({ schoolDomain: setup.schoolDomain ?? '', webmailUrl: setup.webmailUrl ?? '' });
-      },
-      () => setGeminiReady(false),
+      (setup) => setAppConfig({ schoolDomain: setup.schoolDomain ?? '', webmailUrl: setup.webmailUrl ?? '' }),
+      () => undefined,
     );
   }, [connection]);
 
-  const solve = useCallback((detail: ItemDetail) => {
-    const course = detail.course ? `${detail.course} dersindeki ` : '';
-    setChatIntent({
-      model: 'gemini',
-      text: `${course}"${detail.title}" ödevini benim için hazırla. Ayrıntıları ödevin anahtarıyla al: ${detail.key}`,
-    });
-    setTab('chat');
-  }, []);
-  const clearIntent = useCallback(() => setChatIntent(null), []);
   const clearOpenEvent = useCallback(() => setOpenEventId(null), []);
 
   useEffect(() => {
@@ -125,15 +111,14 @@ function Shell() {
       }}
     />
   ) : tab === 'today' ? (
-    <TodayScreen connection={connection} onOpenDrafts={() => setTab('drafts')} onSolve={geminiReady ? solve : undefined} />
+    <TodayScreen connection={connection} onOpenDrafts={() => setTab('drafts')} />
   ) : tab === 'chat' ? (
-    <ChatScreen connection={connection} intent={chatIntent} onIntentUsed={clearIntent} />
+    <ChatScreen connection={connection} />
   ) : tab === 'events' ? (
     <EventsScreen
       connection={connection}
       openEventId={openEventId}
       onOpened={clearOpenEvent}
-      onSolve={geminiReady ? solve : undefined}
     />
   ) : (
     <DraftsScreen connection={connection} />

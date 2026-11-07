@@ -8,7 +8,7 @@
 import { File, Paths } from 'expo-file-system';
 
 import { AttendanceNote, findAttendance, MAX_ATTENDANCE_NOTES } from './attendance';
-import { courseFiles, courseInfo, CanvasItem, frontPage, moduleItems } from './canvas';
+import { courseFile, courseFiles, courseInfo, CanvasItem, frontPage, moduleItems } from './canvas';
 import { geminiReadPdf } from './gemini';
 import { htmlToText } from './text';
 
@@ -62,6 +62,8 @@ const PLAUSIBLE_ROW_WEEKS = { midterm: [4, 12], final: [10, 18] };
 const NUMBER_AFTER = /^\s*[-#]?\s*([1-3]|ii|i)(?![a-zA-Z0-9])(?!\.?\s*(?:hafta|week))/i;
 const NUMBER_BEFORE = /(?:([1-3])\s*(?:st|nd|rd|\.)|(birinci|first|ikinci|second))\s*$/i;
 const LONG_LIST_ITEM = 40;
+const FILE_LINK = /\/files\/(\d+)/g;
+const MAX_LINKED_FILES = 10;
 const SYLLABUS_WORDS = /syllabus|izlence|outline|course\s*(?:info|plan|description)|ders\s*(?:bilgi|plan|tan[ıi]t)/i;
 const FILE_SEARCHES = ['syllabus', 'izlence', 'outline', 'course', 'ders'];
 const LINK = /https:\/\/[^\s"'<>)\]]+/g;
@@ -268,6 +270,24 @@ async function downloadPdf(url: string): Promise<string | null> {
   }
 }
 
+/** Gemini's limit is not the same as an unreadable file: the course is read again, not put off for a week. */
+export class ScanLater extends Error {}
+
+const PDF_GAP_MS = 6500; // about 9 a minute: 3.5 Flash-Lite allows about 10
+let lastPdfRead = 0;
+
+async function pacedRead(gemini: NonNullable<Gemini>, data: string): Promise<string> {
+  const wait = lastPdfRead + PDF_GAP_MS - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastPdfRead = Date.now();
+  try {
+    return await geminiReadPdf(gemini.key, gemini.model, data);
+  } catch (error) {
+    if (error instanceof Error && /\b429\b/.test(error.message)) throw new ScanLater(error.message);
+    return '';
+  }
+}
+
 export type CourseScan = { found: FoundExam[]; hasSyllabus: boolean; termStart: string | null; hint: string; attendance: AttendanceNote[] };
 type Gemini = { key: string; model: string } | null;
 
@@ -291,20 +311,33 @@ export async function scanCourse(creds: { url: string; token: string }, courseId
     noteAttendance(index === 0 ? 'syllabus' : 'ders sayfası', text);
     links.push(...(page.match(LINK) ?? []).filter(isOneDrive));
   });
+  // Files are often closed to students as a list, so what a page or a module links to is followed too.
+  const named = new Set<number>(); // on the syllabus page itself: it counts whatever it is called
+  const linkedFiles = new Set<number>();
+  for (const match of (pages[0] ?? '').matchAll(FILE_LINK)) {
+    named.add(Number(match[1]));
+    linkedFiles.add(Number(match[1]));
+  }
+  for (const match of (pages[1] ?? '').matchAll(FILE_LINK)) linkedFiles.add(Number(match[1]));
   for (const item of await moduleItems(creds, courseId)) {
     if (item.type === 'ExternalUrl' && isOneDrive(item.external_url ?? '')) links.push(item.external_url);
+    if (item.type === 'File' && item.content_id && SYLLABUS_WORDS.test(item.title ?? '')) linkedFiles.add(Number(item.content_id));
   }
   const files = new Map<number, any>();
+  for (const id of [...linkedFiles].slice(0, MAX_LINKED_FILES)) {
+    const file = await courseFile(creds, courseId, id);
+    if (file?.id) files.set(file.id, file);
+  }
   for (const word of FILE_SEARCHES) {
     for (const file of await courseFiles(creds, courseId, word)) files.set(file.id, file);
   }
   const wanted = [...files.values()].filter(
-    (file) => /\.pdf$/i.test(file.display_name ?? '') && SYLLABUS_WORDS.test(file.display_name ?? '') && (file.size ?? 0) <= MAX_DOCUMENT_BYTES && file.url,
-  );
+    (file) => /\.pdf$/i.test(file.display_name ?? '') && (named.has(file.id) || SYLLABUS_WORDS.test(file.display_name ?? '')) && (file.size ?? 0) <= MAX_DOCUMENT_BYTES && file.url,
+  ).sort((a, b) => Number(named.has(b.id)) - Number(named.has(a.id)));
   const read = async (url: string): Promise<string> => {
     if (!gemini) return '';
     const data = await downloadPdf(url);
-    return data ? geminiReadPdf(gemini.key, gemini.model, data).catch(() => '') : '';
+    return data ? pacedRead(gemini, data) : '';
   };
   for (const file of wanted.slice(0, MAX_FILES_PER_COURSE)) {
     if (!gemini) {
