@@ -58,7 +58,7 @@ leaves the phone except requests to your Canvas.
 
 In **Ayarlar → Okul maili**, enter your school's IMAP server, your username and your password. Kamil connects over TLS only, on port
 993 unless you write another, and checks the server's certificate and name. It opens the inbox read-only, so unread mail stays unread,
-and it cannot delete anything. It sends only a draft you approve under **Onaylar**, over an encrypted connection, and a copy does not go to your Sent folder. New mail appears under **Bildirimler → E-posta**, and mail that looks important also notifies
+and it cannot delete anything. It sends only a draft you approve under **Onaylar**, with [Eclipse Angus Mail](https://github.com/eclipse-ee4j/angus-mail) and only over an encrypted connection, and a copy does not go to your Sent folder. New mail appears under **Bildirimler → E-posta**, and mail that looks important also notifies
 you. Mail stays out of chat unless you turn on **Okul maili bulut modele gitsin**, which sends the mail Kamil reads to the provider you chose. Gmail and
 similar services need an app password rather than your normal one. Attachments and images are not opened on the phone.
 

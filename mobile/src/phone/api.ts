@@ -310,7 +310,7 @@ export const phoneApi = {
       messageId = await sendMail(sender.host, sender.user, sender.password, {
         from: sender.from, to, subject: stored.subject, body: stored.body, inReplyTo: stored.inReplyTo,
         references: [stored.references, stored.inReplyTo].filter(Boolean).join(' '),
-      }, now);
+      });
     } catch (error) {
       throw new ApiError(error instanceof SmtpError ? error.message : 'Mail gönderilemedi.', 502);
     }

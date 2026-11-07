@@ -13,3 +13,11 @@ android {
     versionName '1.0.0'
   }
 }
+
+dependencies {
+  // Sending only. Reading stays in src/phone/imap.ts, which opens the mailbox read-only.
+  implementation('org.eclipse.angus:jakarta.mail:2.0.5') {
+    exclude group: 'org.graalvm.sdk'
+  }
+  implementation 'jakarta.activation:jakarta.activation-api:2.1.4'
+}

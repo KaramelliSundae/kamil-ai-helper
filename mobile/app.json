@@ -8,7 +8,9 @@
     "icon": "./assets/icon.png",
     "android": {
       "package": "com.aiders.mobile",
-      "permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"],
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundImage": "./assets/adaptive-background.png",
@@ -47,7 +49,15 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "extraProguardRules": "# WorkManager finds its Room database through reflection; R8 otherwise drops the constructor and the app crashes at launch.\n-keep class * extends androidx.room.RoomDatabase { <init>(); }"
+            "extraProguardRules": "# WorkManager finds its Room database through reflection; R8 otherwise drops the constructor and the app crashes at launch.\n-keep class * extends androidx.room.RoomDatabase { <init>(); }\n# Angus Mail finds its transport and text handlers by name; R8 otherwise drops them.\n-keep class org.eclipse.angus.** { *; }\n-keep class jakarta.mail.** { *; }\n-keep class jakarta.activation.** { *; }\n-dontwarn org.eclipse.angus.**\n-dontwarn jakarta.mail.**\n-dontwarn jakarta.activation.**\n-dontwarn org.graalvm.**\n",
+            "packagingOptions": {
+              "pickFirst": [
+                "META-INF/LICENSE.md",
+                "META-INF/NOTICE.md",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE.txt"
+              ]
+            }
           }
         }
       ],
