@@ -23,6 +23,7 @@ export type NativeMail = {
   subject?: string;
   sender?: string;
   from?: string;
+  to?: string;
   date?: number | null;
   plain?: string;
   html?: string;
@@ -34,7 +35,7 @@ export type MailBatch = { uidvalidity: number; lastUid: number; mails: NativeMai
 
 type MailSocketModule = {
   countInbox(account: MailAccount): Promise<number>;
-  readMail(request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number }): Promise<MailBatch>;
+  readMail(request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number; sent?: boolean }): Promise<MailBatch>;
   sendMail(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }>;
 };
 
@@ -42,7 +43,7 @@ type MailSocketModule = {
 const native = () => requireNativeModule<MailSocketModule>('MailSocket');
 
 export const countInbox = (account: MailAccount) => native().countInbox(account);
-export const readMail = (request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number }) => native().readMail(request);
+export const readMail = (request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number; sent?: boolean }) => native().readMail(request);
 
 /** Sends one mail, encrypted or not at all, and keeps its copy in Sent. */
 export function sendSmtp(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }> {

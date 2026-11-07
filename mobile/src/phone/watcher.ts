@@ -8,7 +8,7 @@ import * as Notifications from 'expo-notifications';
 import type { EventItem } from '../types';
 import { activeCourses, CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
 import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, ScanLater, TRUST } from './exams';
-import { ImapAuthError, MailItem, mailProblem, readNewMail } from './mail';
+import { ImapAuthError, MailItem, mailProblem, readNewMail, readSentMail } from './mail';
 import { loadMailSettings, loadPhoneSettings, PhoneSettings } from './settings';
 import { PhoneState, readState, StoredItem, updateState } from './store';
 import { fingerprint, shorten } from './text';
@@ -107,6 +107,17 @@ function backfill(state: PhoneState, source: 'canvas' | 'mail', now: Date): void
     .filter((item) => item.postedAt && Date.parse(item.postedAt) >= since)
     .sort((a, b) => Date.parse(a.postedAt!) - Date.parse(b.postedAt!));
   for (const item of recent) {
+    recordChange(state, item, { type: 'new' }, now);
+    Object.assign(state.events[state.events.length - 1], { createdAt: item.postedAt, read: true, silent: true });
+  }
+}
+
+/** The student's own mails join their conversations, read and silent. One Kamil sent itself is here already, under its own key. */
+function keepSent(state: PhoneState, items: MailItem[], now: Date, stamp: string): void {
+  const known = new Set(Object.values(state.items).map((item) => item.messageId).filter(Boolean));
+  for (const item of items) {
+    if (item.messageId && known.has(item.messageId)) continue;
+    upsert(state, item, stamp);
     recordChange(state, item, { type: 'new' }, now);
     Object.assign(state.events[state.events.length - 1], { createdAt: item.postedAt, read: true, silent: true });
   }
@@ -323,11 +334,13 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
   // Each source fails on its own: Canvas being down never stops mail, and the other way round.
   const mailSettings = await loadMailSettings();
   let mail: { items: MailItem[]; cursor: { uidvalidity: number; lastUid: number } } | null = null;
+  let sent: Awaited<ReturnType<typeof readSentMail>> = null;
   let mailFailure: unknown = null;
   if (mailSettings.host && mailSettings.password) {
     try {
       const { meta } = await readState();
       mail = await readNewMail(mailSettings, meta.mailWindowRead ? meta.mailCursor ?? null : null, now);
+      sent = await readSentMail(mailSettings, meta.sentCursor ?? null, now);
     } catch (error) {
       mailFailure = error;
     }
@@ -374,6 +387,8 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
       state.meta.mailWindowRead = true;
       if (firstRun && state.meta.backfilled) state.meta.backfilled.mail = false;
       backfill(state, 'mail', now);
+      if (sent) keepSent(state, sent.items, now, stamp);
+      if (sent) state.meta.sentCursor = sent.cursor;
       state.meta.mailFailures = 0;
       state.meta.mailError = undefined;
     }

@@ -2,7 +2,7 @@
 import { countInbox, readMail } from '../../modules/mail-socket';
 import type { CanvasItem } from './canvas';
 import { ImapAuthError, ImapError, MailCursor } from './imap';
-import { threadOf } from '../mailThread';
+import { OUTGOING_KEY, threadOf } from '../mailThread';
 import { mailLevel, parseMail } from './mailparse';
 import { clearMailSettings, MailSettings } from './settings';
 import { updateState } from './store';
@@ -77,6 +77,39 @@ export async function readNewMail(
   return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
 }
 
+/** The student's own mails, so a conversation shows both sides. A mailbox with no Sent folder just has none. */
+export async function readSentMail(settings: MailSettings, cursor: MailCursor | null, now: Date): Promise<{ items: MailItem[]; cursor: MailCursor } | null> {
+  let batch;
+  try {
+    batch = await readMail({ ...account(settings), ...(cursor ?? {}), sinceMs: now.getTime() - FIRST_RUN_DAYS * 864e5, sent: true });
+  } catch {
+    return null; // only the other half of a conversation: the inbox goes on without it
+  }
+  if (!batch.uidvalidity) return null;
+  const items = batch.mails.filter((raw) => !raw.unreadable).map((raw) => {
+    const mail = parseMail(raw, now);
+    return {
+      key: `${OUTGOING_KEY}${batch.uidvalidity}:${raw.uid}`,
+      kind: 'mail',
+      title: mail.subject || '(konusuz)',
+      course: '',
+      url: '',
+      sender: 'Sen',
+      body: mail.body,
+      dueAt: null,
+      postedAt: mail.date ?? now.toISOString(),
+      grade: null,
+      submitted: false,
+      level: 'normal',
+      thread: threadOf(mail.headers, mail.subject),
+      replyTo: raw.to ?? '',
+      messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
+      references: mail.headers.references ?? '',
+    };
+  });
+  return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
+}
+
 /** The account and everything read through it, off this phone. The mailbox itself is untouched. */
 export async function forgetMail(): Promise<void> {
   await clearMailSettings();
@@ -85,6 +118,7 @@ export async function forgetMail(): Promise<void> {
     state.events = state.events.filter((event) => !event.itemKey.startsWith('mail:') && event.itemKey !== 'system:mail');
     state.meta.mailCursor = state.meta.mailFailures = state.meta.mailError = undefined;
     state.meta.mailWindowRead = false;
+    state.meta.sentCursor = undefined;
     if (state.meta.backfilled) state.meta.backfilled.mail = false; // a new account gets its two weeks too
   });
 }

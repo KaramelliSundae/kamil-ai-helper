@@ -5,7 +5,7 @@
 import { Linking } from 'react-native';
 
 import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, TaskOption, Today } from '../types';
-import { plainSubject } from '../mailThread';
+import { isOutgoing, plainSubject } from '../mailThread';
 import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
@@ -123,6 +123,7 @@ export const phoneApi = {
         read: event.read ?? true,
         source: eventSource(event.itemKey),
         thread: item?.thread,
+        outgoing: isOutgoing(event.itemKey),
         hasFiles: !!item?.body?.includes('Ekler (telefonda açılmaz)'),
         fromSchool: !!state.meta.schoolDomain && !!item?.replyTo?.toLowerCase().endsWith(state.meta.schoolDomain.toLowerCase()),
         current: item

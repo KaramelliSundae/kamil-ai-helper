@@ -4,6 +4,12 @@ import type { EventItem } from './types';
 const REPLY_PREFIX = /^\s*(?:re|fw|fwd|ynt|yan[ıi]t|cvp|cevap|ilt|[iİ]let)\s*(?:\[\d+\])?\s*[:：]\s*/i;
 const MAIL_ADDRESS = /^[^\s@<>,;:"?&%]+@[^\s@<>,;:"?&%]+$/;
 const LEVELS = ['low', 'normal', 'high', 'critical'];
+/** The student's own mail read from the Sent folder. One sent from Kamil has `mail:sent:`. */
+export const OUTGOING_KEY = 'mail:out:';
+
+export function isOutgoing(itemKey: string): boolean {
+  return itemKey.startsWith(OUTGOING_KEY) || itemKey.startsWith('mail:sent:');
+}
 
 /** "Re: Ynt: Vize" is the same conversation as "Vize". */
 export function plainSubject(subject: string): string {
@@ -18,8 +24,12 @@ export function threadOf(headers: Record<string, string | undefined>, subject: s
   return ids(headers.references)[0] ?? ids(headers['in-reply-to'])[0] ?? ids(headers['message-id'])[0] ?? `s:${plainSubject(subject)}`;
 }
 
+function subjectOf(event: EventItem): string {
+  return event.current?.title ?? event.title.replace(/^[^:]*:\s*/, '');
+}
+
 function threadKey(event: EventItem): string {
-  return event.thread ?? `s:${plainSubject(event.current?.title ?? event.title.replace(/^[^:]*:\s*/, ''))}`;
+  return event.thread ?? `s:${plainSubject(subjectOf(event))}`;
 }
 
 /**
@@ -39,7 +49,20 @@ export function collapseThreads(events: EventItem[], arrived: (event: EventItem)
     if (group) group.push(event);
     else groups.set(key, [event]);
   }
+  // Not every mail program keeps the headers. A "Re:" with the same subject as another conversation is that conversation.
+  const bySubject = new Map<string, EventItem[]>();
+  for (const [key, group] of groups) {
+    const subject = plainSubject(subjectOf(group[0]));
+    const other = subject ? bySubject.get(subject) : undefined;
+    if (other && group.concat(other).some((event) => REPLY_PREFIX.test(subjectOf(event)))) {
+      other.push(...group);
+      groups.delete(key);
+    } else if (subject && !other) {
+      bySubject.set(subject, group);
+    }
+  }
   for (const group of groups.values()) {
+    if (group.every((event) => isOutgoing(event.itemKey))) continue; // nothing came back: not something to read
     const ordered = [...group].sort((a, b) => arrived(a) - arrived(b) || a.id - b.id);
     const newest = ordered[ordered.length - 1];
     rows.push({

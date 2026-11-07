@@ -83,6 +83,8 @@ export type PhoneState = {
     backfilled?: { canvas?: boolean; mail?: boolean };
     /** The first read took every mail of its two weeks, with what conversations need. Older installs read once more. */
     mailWindowRead?: boolean;
+    /** How far the Sent folder has been read. */
+    sentCursor?: { uidvalidity: number; lastUid: number };
     mailFailures?: number;
     mailError?: string;
     firstName?: string;

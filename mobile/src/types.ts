@@ -125,6 +125,8 @@ export type EventItem = {
   current?: { postedAt?: string | null; title: string; course: string; dueAt: string | null; submitted: boolean; grade: string | null } | null;
   /** Mail: the conversation, as its headers name it. Older servers send none, and the subject decides. */
   thread?: string;
+  /** Mail the student sent: only a side of a conversation, never a row of its own. */
+  outgoing?: boolean;
   /** Mail: it has attachments, and it came from the school's domain. */
   hasFiles?: boolean;
   fromSchool?: boolean;

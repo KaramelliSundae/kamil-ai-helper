@@ -22,6 +22,7 @@ import jakarta.mail.Message
 import jakarta.mail.MessagingException
 import jakarta.mail.SendFailedException
 import jakarta.mail.Session
+import jakarta.mail.Store
 import jakarta.mail.Transport
 import jakarta.mail.internet.InternetAddress
 import jakarta.mail.internet.MimeMessage
@@ -62,6 +63,7 @@ class ReadRequest : Record {
   @Field var uidvalidity: Double? = null
   @Field var lastUid: Double? = null
   @Field var sinceMs: Double = 0.0
+  @Field var sent: Boolean = false
 }
 
 class OutgoingMail : Record {
@@ -134,10 +136,7 @@ private fun keepInSent(mail: OutgoingMail, message: MimeMessage): Boolean {
   val store = session(mail.host, mail.imapPort, "mail.imaps").getStore("imaps")
   try {
     store.connect(mail.user, mail.password)
-    val folders = store.defaultFolder.list("*")
-    val sent = folders.firstOrNull { folder -> (folder as? IMAPFolder)?.attributes?.any { it.equals("\\Sent", true) } == true }
-      ?: SENT_NAMES.firstNotNullOfOrNull { name -> folders.firstOrNull { it.fullName.equals(name, true) || it.name.equals(name, true) } }
-      ?: return false
+    val sent = sentFolder(store) ?: return false
     message.setFlag(Flags.Flag.SEEN, true)
     sent.appendMessages(arrayOf<Message>(message))
     return true
@@ -212,12 +211,19 @@ private const val MAX_ATTACHMENTS = 20
 private const val MAX_NAME_CHARS = 120
 private val WANTED_HEADERS = listOf("message-id", "references", "in-reply-to", "precedence", "list-unsubscribe", "list-id", "auto-submitted")
 
-private fun <T> inbox(host: String, port: Int, user: String, password: String, work: (IMAPFolder, Session) -> T): T {
+private fun sentFolder(store: Store): Folder? {
+  val folders = store.defaultFolder.list("*")
+  return folders.firstOrNull { folder -> (folder as? IMAPFolder)?.attributes?.any { it.equals("\\Sent", true) } == true }
+    ?: SENT_NAMES.firstNotNullOfOrNull { name -> folders.firstOrNull { it.fullName.equals(name, true) || it.name.equals(name, true) } }
+}
+
+private fun <T> inbox(host: String, port: Int, user: String, password: String, sent: Boolean = false, none: T? = null, work: (IMAPFolder, Session) -> T): T {
   val session = session(host, port, "mail.imaps")
   val store = session.getStore("imaps")
   try {
     store.connect(user, password)
-    val folder = store.getFolder("INBOX") as IMAPFolder
+    val folder = (if (sent) sentFolder(store) else store.getFolder("INBOX")) as? IMAPFolder
+      ?: return none ?: throw CodedException("ERR_MAIL_SEND", "No such folder", null)
     folder.open(Folder.READ_ONLY)
     try {
       return work(folder, session)
@@ -278,6 +284,7 @@ private fun parsed(uid: Long, raw: ByteArrayInputStream?, session: Session): Map
       "subject" to runCatching { message.subject }.getOrNull().orEmpty(),
       "sender" to from?.personal.orEmpty(),
       "from" to from?.address.orEmpty(),
+      "to" to runCatching { (message.getRecipients(Message.RecipientType.TO)?.firstOrNull() as? InternetAddress)?.address }.getOrNull().orEmpty(),
       "date" to runCatching { message.sentDate?.time?.toDouble() }.getOrNull(),
       "plain" to found.plain,
       "html" to found.html,
@@ -294,7 +301,7 @@ private fun parsed(uid: Long, raw: ByteArrayInputStream?, session: Session): Map
  * server renumbered the folder, so old numbers mean nothing and reading goes on from the newest mail.
  */
 fun readMail(request: ReadRequest): Map<String, Any?> =
-  inbox(request.host, request.port, request.user, request.password) { folder, session ->
+  inbox(request.host, request.port, request.user, request.password, request.sent, mapOf("uidvalidity" to 0.0, "lastUid" to 0.0, "mails" to emptyList<Any>())) { folder, session ->
     val validity = folder.uidValidity
     val next = folder.uidNext
     val lastSeen = request.lastUid?.toLong()
