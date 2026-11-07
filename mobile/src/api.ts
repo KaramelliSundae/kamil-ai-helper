@@ -166,7 +166,7 @@ export const api = {
   sendDraft: (c: Connection, draft: Draft) =>
     c.mode === 'phone'
       ? phoneApi.sendDraft(draft)
-      : request<{ status: string }>(c, `/v1/drafts/${draft.id}/send`, 'POST', { hash: draft.hash }),
+      : request<{ status: string; sentCopy?: boolean }>(c, `/v1/drafts/${draft.id}/send`, 'POST', { hash: draft.hash }),
   canSendMail: (c: Connection) => (c.mode === 'phone' ? phoneApi.canSendMail() : Promise.resolve(true)),
   openDraftInMailApp: (draft: Draft) => phoneApi.openDraftInMailApp(draft),
   discardDraft: (c: Connection, draft: Draft) =>

@@ -30,7 +30,7 @@ export function ReplyComposer({ connection, itemKey, title, to, onSent, onSaved,
   itemKey: string;
   title: string;
   to: string;
-  onSent: () => void;
+  onSent: (sentCopy: boolean) => void;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -67,8 +67,8 @@ export function ReplyComposer({ connection, itemKey, title, to, onSent, onSaved,
     setBody(text);
   });
   const send = () => run('sending', async () => {
-    await api.sendReply(itemKey, recipient, body);
-    onSent();
+    const { sentCopy } = await api.sendReply(itemKey, recipient, body);
+    onSent(sentCopy !== false);
   });
   const save = () => run('saving', async () => {
     await api.saveReply(itemKey, recipient, body);

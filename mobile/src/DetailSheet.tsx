@@ -219,9 +219,9 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
             itemKey={target.key}
             title={detail.title}
             to={detail.replyTo}
-            onSent={() => {
+            onSent={(sentCopy) => {
               setReplying(false);
-              setNote('Mail gönderildi.');
+              setNote(sentCopy ? 'Mail gönderildi, kopyası Gönderilmiş klasöründe.' : "Mail gönderildi, ama Gönderilmiş klasörüne kopya bırakılamadı. Yalnızca Kamil'de görünür.");
               onChanged?.();
             }}
             onSaved={() => {

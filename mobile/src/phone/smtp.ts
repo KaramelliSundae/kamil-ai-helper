@@ -34,9 +34,12 @@ function problem(error: unknown): string {
   }
 }
 
-export async function sendMail(host: string, user: string, password: string, mail: Outgoing): Promise<string> {
+// These keep their own copy of what goes through them, so a second one would only be a duplicate.
+const KEEPS_ITS_OWN_COPY = /(^|\.)(gmail|googlemail|outlook|office365|hotmail)\.com$/i;
+
+export async function sendMail(host: string, imapPort: number, user: string, password: string, mail: Outgoing): Promise<{ id: string; sentCopy: boolean }> {
   try {
-    return await sendSmtp({ host, user, password, ...mail });
+    return await sendSmtp({ host, imapPort, saveCopy: !KEEPS_ITS_OWN_COPY.test(host), user, password, ...mail });
   } catch (error) {
     throw new SmtpError(problem(error));
   }

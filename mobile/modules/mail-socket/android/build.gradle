@@ -15,7 +15,7 @@ android {
 }
 
 dependencies {
-  // Sending only. Reading stays in src/phone/imap.ts, which opens the mailbox read-only.
+  // All of the school mail: reading, sending and the copy in Sent.
   implementation('org.eclipse.angus:jakarta.mail:2.0.5') {
     exclude group: 'org.graalvm.sdk'
   }

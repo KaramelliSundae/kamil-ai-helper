@@ -46,12 +46,12 @@ function mailto(draft: Draft): string {
   return `mailto:${encodeURIComponent(draft.to).replace(/%40/g, '@').replace(/%2C/gi, ',')}?${query}`;
 }
 
-async function senderOf(): Promise<{ host: string; user: string; password: string; from: string } | null> {
+async function senderOf(): Promise<{ host: string; port: number; user: string; password: string; from: string } | null> {
   const [mail, state] = await Promise.all([loadMailSettings(), readState()]);
   const target = parseMailHost(mail.host ?? '');
   if (!target || !mail.password) return null;
   const from = mail.user.includes('@') ? mail.user : state.meta.schoolDomain ? `${mail.user}@${state.meta.schoolDomain}` : '';
-  return from ? { host: target.host, user: mail.user, password: mail.password, from } : null;
+  return from ? { host: target.host, port: target.port, user: mail.user, password: mail.password, from } : null;
 }
 
 async function approved(draft: Draft) {
@@ -268,7 +268,7 @@ export const phoneApi = {
   },
 
   /** Sent straight from the box, after the student confirmed. If it fails nothing stays behind: the text is still in the box. */
-  async sendReply(key: string, to: string, body: string): Promise<{ status: string }> {
+  async sendReply(key: string, to: string, body: string): Promise<{ status: string; sentCopy?: boolean }> {
     const draft = await phoneApi.saveReply(key, to, body);
     try {
       return await phoneApi.sendDraft(draft);
@@ -340,16 +340,16 @@ export const phoneApi = {
   },
 
   /** Sends with the school account, only ever from the student's tap in Onaylar, and only what they saw. */
-  async sendDraft(draft: Draft): Promise<{ status: string }> {
+  async sendDraft(draft: Draft): Promise<{ status: string; sentCopy?: boolean }> {
     const stored = await approved(draft);
     const sender = await senderOf();
     if (!sender) return openInMailApp(draft);
     const now = new Date();
     let to: string[];
-    let messageId: string;
+    let result: { id: string; sentCopy: boolean };
     try {
       to = recipients(stored.to);
-      messageId = await sendMail(sender.host, sender.user, sender.password, {
+      result = await sendMail(sender.host, sender.port, sender.user, sender.password, {
         from: sender.from, to, subject: stored.subject, body: stored.body, inReplyTo: stored.inReplyTo,
         references: [stored.references, stored.inReplyTo].filter(Boolean).join(' '),
       });
@@ -359,12 +359,12 @@ export const phoneApi = {
     await updateState((saved) => {
       const row = saved.drafts.find((d) => d.id === draft.id);
       if (row) row.status = 'sent';
-      // It shows in its conversation here. The school's Sent folder does not get a copy: Kamil never writes to the mailbox.
+      // It shows in its conversation here as well as in the Sent folder.
       const key = `mail:sent:${draft.id}`;
       const stamp = now.toISOString();
       saved.items[key] = {
         key, kind: 'mail', title: stored.subject, course: '', url: '', sender: 'Sen', body: stored.body, dueAt: null, postedAt: stamp,
-        grade: null, submitted: false, thread: stored.thread ?? `s:${plainSubject(stored.subject)}`, replyTo: to[0], messageId,
+        grade: null, submitted: false, thread: stored.thread ?? `s:${plainSubject(stored.subject)}`, replyTo: to[0], messageId: result.id,
         references: stored.references, firstSeen: stamp, lastSeen: stamp,
       };
       saved.events.push({
@@ -373,7 +373,7 @@ export const phoneApi = {
       });
       saved.nextEventId += 1;
     });
-    return { status: 'sent' };
+    return { status: 'sent', sentCopy: result.sentCopy };
   },
 
   /** The way out when sending does not work, or the student would rather send it from there. */

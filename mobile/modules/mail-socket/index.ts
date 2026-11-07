@@ -1,5 +1,7 @@
-/** The native side of phone mail: see MailSocketModule.kt. Strings here hold one byte per character. */
+/** The native side of phone mail, Eclipse Angus Mail: see AngusMail.kt. */
 import { requireNativeModule } from 'expo';
+
+export type MailAccount = { host: string; port: number; user: string; password: string };
 
 export type SmtpMail = {
   host: string;
@@ -11,35 +13,38 @@ export type SmtpMail = {
   body: string;
   inReplyTo?: string;
   references?: string;
+  imapPort: number;
+  saveCopy: boolean;
 };
+
+export type NativeMail = {
+  uid: number;
+  unreadable?: boolean;
+  subject?: string;
+  sender?: string;
+  from?: string;
+  date?: number | null;
+  plain?: string;
+  html?: string;
+  attachments?: string[];
+  headers?: Record<string, string>;
+};
+
+export type MailBatch = { uidvalidity: number; lastUid: number; mails: NativeMail[] };
 
 type MailSocketModule = {
-  open(host: string, port: number, timeoutMs: number): Promise<number>;
-  sendMail(mail: SmtpMail): Promise<string>;
-  write(handle: number, data: string): Promise<void>;
-  read(handle: number): Promise<string>;
-  close(handle: number): Promise<void>;
+  countInbox(account: MailAccount): Promise<number>;
+  readMail(request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number }): Promise<MailBatch>;
+  sendMail(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }>;
 };
-
-const TIMEOUT_MS = 30000;
 
 // Looked up when used rather than on import: without the native side only mail fails, not the whole app.
 const native = () => requireNativeModule<MailSocketModule>('MailSocket');
 
-function connection(handle: number) {
-  const socket = native();
-  return {
-    write: (data: string) => socket.write(handle, data),
-    read: () => socket.read(handle),
-    close: () => socket.close(handle),
-  };
-}
+export const countInbox = (account: MailAccount) => native().countInbox(account);
+export const readMail = (request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number }) => native().readMail(request);
 
-export async function openMailSocket(host: string, port: number) {
-  return connection(await native().open(host, port, TIMEOUT_MS));
-}
-
-/** Sends one mail with Eclipse Angus Mail, encrypted or not at all. Returns its Message-ID. */
-export function sendSmtp(mail: SmtpMail): Promise<string> {
+/** Sends one mail, encrypted or not at all, and keeps its copy in Sent. */
+export function sendSmtp(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }> {
   return native().sendMail(mail);
 }

@@ -1,7 +1,7 @@
-/** School mail in the phone mode: settings to a connection, raw mail to the items the rest of the app knows. */
-import { openMailSocket } from '../../modules/mail-socket';
+/** School mail in the phone mode: settings to a connection, what Angus read to the items the rest of the app knows. */
+import { countInbox, readMail } from '../../modules/mail-socket';
 import type { CanvasItem } from './canvas';
-import { countInbox, fetchMail, ImapAuthError, ImapError, MailCursor, MailTransport } from './imap';
+import { ImapAuthError, ImapError, MailCursor } from './imap';
 import { threadOf } from '../mailThread';
 import { mailLevel, parseMail } from './mailparse';
 import { clearMailSettings, MailSettings } from './settings';
@@ -21,28 +21,43 @@ export function parseMailHost(value: string): { host: string; port: number } | n
   return port >= 1 && port <= 65535 ? { host: match[1].toLowerCase(), port } : null;
 }
 
-async function connect(settings: Pick<MailSettings, 'host'>): Promise<MailTransport> {
+function account(settings: Pick<MailSettings, 'host' | 'user' | 'password'>) {
   const target = parseMailHost(settings.host);
   if (!target) throw new ImapError('Mail sunucusunun adı geçersiz');
-  return openMailSocket(target.host, target.port);
+  return { host: target.host, port: target.port, user: settings.user, password: settings.password };
+}
+
+function refused(error: unknown): Error {
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'ERR_MAIL_AUTH') return new ImapAuthError('Kullanıcı adı veya şifre kabul edilmedi');
+  return error instanceof Error ? error : new ImapError('Mail sunucusuna bağlanılamadı');
 }
 
 /** Tries the account. Returns how many mails the inbox holds. */
 export async function checkMailAccount(settings: Pick<MailSettings, 'host' | 'user' | 'password'>): Promise<number> {
-  return countInbox(await connect(settings), settings.user, settings.password);
+  try {
+    return await countInbox(account(settings));
+  } catch (error) {
+    throw refused(error);
+  }
 }
 
 export async function readNewMail(
   settings: MailSettings, cursor: MailCursor | null, now: Date,
 ): Promise<{ items: MailItem[]; cursor: MailCursor }> {
-  const since = new Date(now.getTime() - FIRST_RUN_DAYS * 864e5);
-  const result = await fetchMail(await connect(settings), settings.user, settings.password, cursor, since);
-  const items = result.mails.map(({ uid, uidvalidity, data }) => {
-    const mail = parseMail(data, now);
+  const since = now.getTime() - FIRST_RUN_DAYS * 864e5;
+  let batch;
+  try {
+    batch = await readMail({ ...account(settings), ...(cursor ?? {}), sinceMs: since });
+  } catch (error) {
+    throw refused(error);
+  }
+  const items = batch.mails.map((raw) => {
+    const mail = parseMail(raw, now);
     return {
-      key: `mail:${uidvalidity}:${uid}`,
+      key: `mail:${batch.uidvalidity}:${raw.uid}`,
       kind: 'mail',
-      title: mail.subject || '(konusuz)',
+      title: raw.unreadable ? '(açılamayan mail)' : mail.subject || '(konusuz)',
       course: '',
       url: '',
       sender: mail.sender,
@@ -59,7 +74,7 @@ export async function readNewMail(
       references: mail.headers.references ?? '',
     };
   });
-  return { items, cursor: result.cursor };
+  return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
 }
 
 /** The account and everything read through it, off this phone. The mailbox itself is untouched. */

@@ -138,6 +138,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
   const [confirming, setConfirming] = useState<Draft | null>(null);
   const [canSend, setCanSend] = useState(connection.mode !== 'phone');
   const [editing, setEditing] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => {
     api.canSendMail(connection).then(setCanSend, () => setCanSend(false));
@@ -196,6 +197,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
         />
         {error ? <Notice tone="error">{error}</Notice> : null}
         {actionError ? <Notice tone="error">{actionError}</Notice> : null}
+        {note ? <Notice>{note}</Notice> : null}
         {!data && !error ? (
           <Row modifiers={[fillMaxWidth(), paddingAll(32)]} horizontalArrangement="center">
             <LoadingIndicator />
@@ -228,7 +230,10 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
               onClick={() => {
                 const draft = confirming;
                 setConfirming(null);
-                void act(() => api.sendDraft(connection, draft));
+                void act(async () => {
+                  const { sentCopy } = await api.sendDraft(connection, draft);
+                  setNote(sentCopy === false ? "Mail gönderildi, ama Gönderilmiş klasörüne kopya bırakılamadı. Yalnızca Kamil'de görünür." : null);
+                });
               }}>
               <Text>{canSend ? 'Gönder' : 'Aç'}</Text>
             </TextButton>
