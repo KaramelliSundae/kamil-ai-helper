@@ -27,6 +27,7 @@ import { courseIcon } from '../courseIcon';
 import { DetailSheet } from '../DetailSheet';
 import { arrivedAt, eventRow, eventView, groupByDay, ListEntry, rowTime } from '../eventView';
 import { icons } from '../icons';
+import { collapseThreads } from '../mailThread';
 import { Choices, groupedShape, Header, Notice, Refreshable, rounded, ShapeIcon, shapes } from '../ui';
 import { useLoad } from '../useLoad';
 
@@ -40,7 +41,7 @@ function isUnread(event: EventItem): boolean {
   return event.read === false;
 }
 
-type Filter = 'all' | 'unread' | 'important' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder';
+type Filter = 'all' | 'unread' | 'important' | 'conversation' | 'files' | 'school' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder';
 
 const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
   canvas: [
@@ -55,6 +56,9 @@ const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
   mail: [
     { id: 'unread', label: 'Okunmamış' },
     { id: 'important', label: 'Önemli' },
+    { id: 'conversation', label: 'Konuşma' },
+    { id: 'files', label: 'Ekli' },
+    { id: 'school', label: 'Okuldan' },
   ],
 };
 
@@ -64,6 +68,9 @@ function matches(event: EventItem, filter: Filter): boolean {
     case 'all': return event.type !== 'reminder';
     case 'unread': return isUnread(event);
     case 'important': return event.level === 'critical' || event.level === 'high';
+    case 'conversation': return threadSize(event) > 1;
+    case 'files': return !!event.hasFiles;
+    case 'school': return !!event.fromSchool;
     case 'announcement': return event.itemKey.startsWith('announcement:');
     case 'exam': return event.type === 'exam';
     case 'grade': return event.type === 'graded';
@@ -84,6 +91,11 @@ function iconFor(event: EventItem) {
   if (event.itemKey.startsWith('announcement:')) return icons.campaign;
   if (event.itemKey.startsWith('message:')) return icons.forum;
   return icons.assignment;
+}
+
+/** How many mails a conversation's row stands for. */
+function threadSize(item: EventItem): number {
+  return new Set((item.threadEvents ?? []).map((one) => one.itemKey)).size;
 }
 
 function EventCard({ item, now, shape, onOpen }: {
@@ -121,7 +133,7 @@ function EventCard({ item, now, shape, onOpen }: {
             maxLines={2}
             overflow="ellipsis"
             style={{ typography: 'titleSmall', fontWeight: unread ? '700' : '500' }}>
-            {view.headline}
+            {threadSize(item) > 1 ? `${view.headline} (${threadSize(item)})` : view.headline}
           </Text>
           {view.preview ? (
             <Text color={colors.onSurfaceVariant} maxLines={2} overflow="ellipsis" style={{ typography: 'bodySmall' }}>
@@ -243,11 +255,12 @@ function CoursePicker({ courses, course, onChange }: {
   );
 }
 
-export function EventsScreen({ connection, openEventId, onOpened }: {
+export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }: {
   connection: Connection;
   /** A tapped phone notification: its details open as soon as the list has it. */
   openEventId: number | null;
   onOpened: () => void;
+  onOpenDrafts: () => void;
 }) {
   const colors = useMaterialColors();
   const load = useCallback(() => api.events(connection), [connection]);
@@ -281,9 +294,10 @@ export function EventsScreen({ connection, openEventId, onOpened }: {
   const remove = useCallback(
     async (event: EventItem) => {
       setActionError(null);
-      setData((events) => events?.filter((other) => other.id !== event.id) ?? events);
+      const ids = new Set((event.threadEvents ?? [event]).map((one) => one.id));
+      setData((events) => events?.filter((other) => !ids.has(other.id)) ?? events);
       try {
-        await api.deleteEvent(connection, event.id);
+        await Promise.all([...ids].map((id) => api.deleteEvent(connection, id)));
       } catch (reason) {
         setActionError(reason instanceof Error ? reason.message : 'Bildirim silinemedi.');
         void refresh();
@@ -296,9 +310,11 @@ export function EventsScreen({ connection, openEventId, onOpened }: {
     async (event: EventItem, read: boolean) => {
       if (isUnread(event) === !read) return;
       setActionError(null);
-      setData((events) => events?.map((other) => (other.id === event.id ? { ...other, read } : other)) ?? events);
+      const changing = (event.threadEvents ?? [event]).filter((one) => isUnread(one) === read);
+      const ids = new Set(changing.map((one) => one.id));
+      setData((events) => events?.map((other) => (ids.has(other.id) ? { ...other, read } : other)) ?? events);
       try {
-        await api.setEventRead(connection, event.id, read);
+        await Promise.all([...ids].map((id) => api.setEventRead(connection, id, read)));
       } catch (reason) {
         setActionError(reason instanceof Error ? reason.message : 'Bildirim işaretlenemedi.');
         void refresh();
@@ -325,7 +341,7 @@ export function EventsScreen({ connection, openEventId, onOpened }: {
 
   useEffect(() => {
     if (openEventId === null || !data) return;
-    const tapped = data.find((event) => event.id === openEventId);
+    const tapped = collapseThreads(data, arrivedAt).find((event) => (event.threadEvents ?? [event]).some((one) => one.id === openEventId));
     if (tapped) {
       setList(sourceOf(tapped));
       setFilter('all');
@@ -336,8 +352,11 @@ export function EventsScreen({ connection, openEventId, onOpened }: {
   }, [data, onOpened, openEvent, openEventId]);
 
   const shown = open ? eventView(open, now) : null;
-  const unreadIn = (source: EventSource) => data?.filter((event) => sourceOf(event) === source && isUnread(event)).length ?? 0;
-  const inList = useMemo(() => data?.filter((event) => sourceOf(event) === list) ?? [], [data, list]);
+  const unreadIn = (source: EventSource) => collapseThreads(data ?? [], arrivedAt).filter((event) => sourceOf(event) === source && isUnread(event)).length ?? 0;
+  const inList = useMemo(() => {
+    const rows = data?.filter((event) => sourceOf(event) === list) ?? [];
+    return list === 'mail' ? collapseThreads(rows, arrivedAt) : rows;
+  }, [data, list]);
   const ofCourse = useMemo(() => inList.filter((event) => !course || event.current?.course === course), [course, inList]);
   const visible = useMemo(
     () => ofCourse.filter((event) => matches(event, filter)).sort((a, b) => arrivedAt(b) - arrivedAt(a) || b.id - a.id),
@@ -478,9 +497,10 @@ export function EventsScreen({ connection, openEventId, onOpened }: {
       {open ? (
         <DetailSheet
           connection={connection}
-          target={{ key: open.itemKey, title: shown?.title ?? open.title, body: shown?.body ?? open.body, url: open.url, when: open.createdAt }}
+          target={{ earlier: (open.threadEvents ?? []).map((one) => one.itemKey).filter((key, index, keys) => key !== open.itemKey && keys.indexOf(key) === index), key: open.itemKey, title: shown?.title ?? open.title, body: shown?.body ?? open.body, url: open.url, when: open.createdAt }}
           tasksEnabled={tasksEnabled}
           onClose={() => setOpen(null)}
+          onOpenDrafts={onOpenDrafts}
         />
       ) : null}
     </Refreshable>

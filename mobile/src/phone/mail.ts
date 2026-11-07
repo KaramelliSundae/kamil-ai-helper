@@ -2,6 +2,7 @@
 import { openMailSocket } from '../../modules/mail-socket';
 import type { CanvasItem } from './canvas';
 import { countInbox, fetchMail, ImapAuthError, ImapError, MailCursor, MailTransport } from './imap';
+import { threadOf } from '../mailThread';
 import { mailLevel, parseMail } from './mailparse';
 import { clearMailSettings, MailSettings } from './settings';
 import { updateState } from './store';
@@ -9,7 +10,7 @@ import { updateState } from './store';
 const DEFAULT_PORT = 993; // TLS from the first byte: there is no plain connection here at all
 const FIRST_RUN_DAYS = 14;
 
-export type MailItem = CanvasItem & { level: string };
+export type MailItem = CanvasItem & { level: string; thread: string; replyTo: string; messageId: string; references: string };
 export { ImapAuthError };
 
 /** "posta.uni.edu" or "posta.uni.edu:993", or null when it is not a bare server name. */
@@ -51,6 +52,11 @@ export async function readNewMail(
       grade: null,
       submitted: false,
       level: mailLevel(mail),
+      thread: threadOf(mail.headers, mail.subject),
+      // Not the Reply-To header: anyone can write there, and a reply should go to who it seems to come from.
+      replyTo: mail.from,
+      messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
+      references: mail.headers.references ?? '',
     };
   });
   return { items, cursor: result.cursor };
@@ -63,6 +69,7 @@ export async function forgetMail(): Promise<void> {
     for (const item of Object.values(state.items)) if (item.kind === 'mail') delete state.items[item.key];
     state.events = state.events.filter((event) => !event.itemKey.startsWith('mail:') && event.itemKey !== 'system:mail');
     state.meta.mailCursor = state.meta.mailFailures = state.meta.mailError = undefined;
+    state.meta.mailWindowRead = false;
     if (state.meta.backfilled) state.meta.backfilled.mail = false; // a new account gets its two weeks too
   });
 }

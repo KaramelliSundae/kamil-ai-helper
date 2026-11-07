@@ -19,7 +19,7 @@ The app's interface is in Turkish.
 | School mail | Optional: the phone reads it over IMAP | Read over IMAP, inside a sandbox |
 | Deadline reminders | Exact alarms 72, 24 and 3 hours before | Same, prepared by the server |
 | Chat model | Gemini 3.8 Flash (cloud) | Gemini, or a local model (llama.cpp, Ollama, LM Studio) |
-| Mail drafts | Open in your phone's mail app; you press send | Sent by the server after you approve them in the app |
+| Mail drafts | Sent with your school account after you approve them in the app, or opened in your mail app | Sent by the server after you approve them in the app |
 | Google Tasks | Optional, or the share sheet with no setup | Optional |
 
 Start with **phone only**: it needs no other machine. Move to a server later if you want it running when your phone is
@@ -58,7 +58,7 @@ leaves the phone except requests to your Canvas.
 
 In **Ayarlar → Okul maili**, enter your school's IMAP server, your username and your password. Kamil connects over TLS only, on port
 993 unless you write another, and checks the server's certificate and name. It opens the inbox read-only, so unread mail stays unread,
-and it cannot delete or send anything. New mail appears under **Bildirimler → E-posta**, and mail that looks important also notifies
+and it cannot delete anything. It sends only a draft you approve under **Onaylar**, over an encrypted connection, and a copy does not go to your Sent folder. New mail appears under **Bildirimler → E-posta**, and mail that looks important also notifies
 you. Mail stays out of chat unless you turn on **Okul maili bulut modele gitsin**, which sends the mail Kamil reads to the provider you chose. Gmail and
 similar services need an app password rather than your normal one. Attachments and images are not opened on the phone.
 

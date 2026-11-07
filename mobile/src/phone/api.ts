@@ -5,11 +5,15 @@
 import { Linking } from 'react-native';
 
 import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, TaskOption, Today } from '../types';
+import { plainSubject } from '../mailThread';
 import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
 import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays } from './settings';
+import { parseMailHost } from './mail';
+import { writeReply } from './reply';
+import { recipients, sendMail, SmtpError } from './smtp';
 import { suggestTasks } from './suggest';
 import { addTask, keepTask, localDay, outdatedTasks, removeTask, updateTask } from './tasks';
 import { readState, updateState } from './store';
@@ -34,6 +38,37 @@ async function freshState() {
 function mailto(draft: Draft): string {
   const query = `subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
   return `mailto:${encodeURIComponent(draft.to).replace(/%40/g, '@').replace(/%2C/gi, ',')}?${query}`;
+}
+
+async function senderOf(): Promise<{ host: string; user: string; password: string; from: string } | null> {
+  const [mail, state] = await Promise.all([loadMailSettings(), readState()]);
+  const target = parseMailHost(mail.host ?? '');
+  if (!target || !mail.password) return null;
+  const from = mail.user.includes('@') ? mail.user : state.meta.schoolDomain ? `${mail.user}@${state.meta.schoolDomain}` : '';
+  return from ? { host: target.host, user: mail.user, password: mail.password, from } : null;
+}
+
+async function approved(draft: Draft) {
+  const state = await readState();
+  const stored = state.drafts.find((d) => d.id === draft.id && d.status === 'pending');
+  if (!stored || stored.to !== draft.to || stored.subject !== draft.subject || stored.body !== draft.body) {
+    throw new ApiError('taslak onayladığın halinden farklı', 409);
+  }
+  return stored;
+}
+
+async function openInMailApp(draft: Draft): Promise<{ status: string }> {
+  // canOpenURL needs a manifest <queries> entry on Android 11+, so the open itself is the test.
+  try {
+    await Linking.openURL(mailto(draft));
+  } catch {
+    throw new ApiError('Telefonda mail uygulaması bulunamadı', 409);
+  }
+  await updateState((saved) => {
+    const row = saved.drafts.find((d) => d.id === draft.id);
+    if (row) row.status = 'opened';
+  });
+  return { status: 'opened' };
 }
 
 export const phoneApi = {
@@ -64,8 +99,10 @@ export const phoneApi = {
         .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
         .map(([key, exam]) => ({ ...exam, key, inTasks: !!state.meta.gtasks?.[key] })),
       examsScanning: !state.meta.firstScanDone,
+      examsScanProgress: state.meta.firstScanDone ? undefined : state.meta.firstScanProgress,
       examsMissing: Object.values(state.examCourses ?? {})
-        .filter((row) => !row.hasSyllabus && !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course))
+        // A course with no exam ahead belongs here, or it shows nowhere: a past estimate or a syllabus without dates is no answer.
+        .filter((row) => !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course && (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10)))
         .map((row) => ({ course: row.course, hint: row.hint })),
     };
   },
@@ -79,6 +116,9 @@ export const phoneApi = {
         // Events from before unread existed count as read.
         read: event.read ?? true,
         source: eventSource(event.itemKey),
+        thread: item?.thread,
+        hasFiles: !!item?.body?.includes('Ekler (telefonda açılmaz)'),
+        fromSchool: !!state.meta.schoolDomain && !!item?.replyTo?.toLowerCase().endsWith(state.meta.schoolDomain.toLowerCase()),
         current: item
           ? { postedAt: item.postedAt, title: item.title, course: item.course, dueAt: item.dueAt, submitted: item.submitted, grade: item.grade }
           : null,
@@ -130,7 +170,7 @@ export const phoneApi = {
     if (!row) throw new ApiError('kayıt bulunamadı', 404);
     return {
       key: row.key, kind: row.kind, title: row.title, course: row.course, sender: row.sender, body: row.body, url: row.url,
-      postedAt: row.postedAt, dueAt: row.dueAt, grade: row.grade, submitted: row.submitted, attachments: [], inTasks: !!state.meta.gtasks?.[key],
+      postedAt: row.postedAt, dueAt: row.dueAt, grade: row.grade, submitted: row.submitted, replyTo: row.replyTo, attachments: [], inTasks: !!state.meta.gtasks?.[key],
     };
   },
 
@@ -177,6 +217,41 @@ export const phoneApi = {
     }
   },
 
+  /** Written from the whole conversation, addressed from the mail's own headers. It waits in Onaylar. */
+  async replyDraft(key: string): Promise<void> {
+    const [state, settings, mail] = await Promise.all([readState(), loadPhoneSettings(), loadMailSettings()]);
+    const row = state.items[key];
+    if (!row || row.kind !== 'mail' || !row.replyTo) throw new ApiError('Bu maile yanıt adresi bulunamadı', 404);
+    const config = cloudConfig(settings);
+    if (!config) throw new ApiError("Model bağlı değil. Yanıtla ile kendin yazabilirsin.", 409);
+    if (!mail.toGemini) throw new ApiError("Mailler bulut modele kapalı. Ayarlar'dan açabilir veya Yanıtla ile kendin yazabilirsin.", 409);
+    const thread = Object.values(state.items)
+      .filter((item) => item.kind === 'mail' && item.thread && item.thread === row.thread)
+      .sort((a, b) => (a.postedAt ?? '').localeCompare(b.postedAt ?? ''));
+    let body: string;
+    try {
+      body = await writeReply(cloudModel(config).chat, thread.length ? thread : [row], state.meta.firstName);
+    } catch (error) {
+      throw new ApiError(error instanceof Error ? error.message : 'Taslak yazılamadı.', 503);
+    }
+    if (!body) throw new ApiError('Model boş yanıt verdi, tekrar dene.', 503);
+    const blanks = /\[[^\]\n]{1,80}\]/.test(body);
+    await updateState((saved) => {
+      saved.drafts.push({
+        id: `${Date.now().toString(36)}${Math.floor(Math.random() * 2 ** 32).toString(16)}`,
+        to: row.replyTo!.slice(0, 300),
+        subject: (/^\s*re\s*:/i.test(row.title) ? row.title : `Re: ${row.title}`).slice(0, 300),
+        body,
+        createdAt: new Date().toISOString(),
+        warnings: blanks ? ['Köşeli parantezli yerleri doldurmadan gönderme: Mail uygulamasında aç ile düzenleyebilirsin.'] : [],
+        status: 'pending',
+        thread: row.thread,
+        inReplyTo: row.messageId || undefined,
+        references: row.references || undefined,
+      });
+    });
+  },
+
   async conversations(): Promise<Conversation[]> {
     const state = await readState();
     const last = new Map<number, number>();
@@ -217,24 +292,52 @@ export const phoneApi = {
       .map((d) => ({ id: d.id, to: d.to, subject: d.subject, body: d.body, hash: d.id, createdAt: d.createdAt, warnings: d.warnings }));
   },
 
-  /** There is no mail server here: the draft opens in the phone's mail app, where the student sends it. */
+  /** Whether Onaylar can send by itself: a mail account, and an address to send from. */
+  async canSendMail(): Promise<boolean> {
+    return !!(await senderOf());
+  },
+
+  /** Sends with the school account, only ever from the student's tap in Onaylar, and only what they saw. */
   async sendDraft(draft: Draft): Promise<{ status: string }> {
-    const state = await readState();
-    const stored = state.drafts.find((d) => d.id === draft.id && d.status === 'pending');
-    if (!stored || stored.to !== draft.to || stored.subject !== draft.subject || stored.body !== draft.body) {
-      throw new ApiError('taslak onayladığın halinden farklı', 409);
-    }
-    // canOpenURL needs a manifest <queries> entry on Android 11+, so the open itself is the test.
+    const stored = await approved(draft);
+    const sender = await senderOf();
+    if (!sender) return openInMailApp(draft);
+    const now = new Date();
+    let to: string[];
+    let messageId: string;
     try {
-      await Linking.openURL(mailto(draft));
-    } catch {
-      throw new ApiError('Telefonda mail uygulaması bulunamadı', 409);
+      to = recipients(stored.to);
+      messageId = await sendMail(sender.host, sender.user, sender.password, {
+        from: sender.from, to, subject: stored.subject, body: stored.body, inReplyTo: stored.inReplyTo,
+        references: [stored.references, stored.inReplyTo].filter(Boolean).join(' '),
+      }, now);
+    } catch (error) {
+      throw new ApiError(error instanceof SmtpError ? error.message : 'Mail gönderilemedi.', 502);
     }
     await updateState((saved) => {
       const row = saved.drafts.find((d) => d.id === draft.id);
-      if (row) row.status = 'opened';
+      if (row) row.status = 'sent';
+      // It shows in its conversation here. The school's Sent folder does not get a copy: Kamil never writes to the mailbox.
+      const key = `mail:sent:${draft.id}`;
+      const stamp = now.toISOString();
+      saved.items[key] = {
+        key, kind: 'mail', title: stored.subject, course: '', url: '', sender: 'Sen', body: stored.body, dueAt: null, postedAt: stamp,
+        grade: null, submitted: false, thread: stored.thread ?? `s:${plainSubject(stored.subject)}`, replyTo: to[0], messageId,
+        references: stored.references, firstSeen: stamp, lastSeen: stamp,
+      };
+      saved.events.push({
+        id: saved.nextEventId, itemKey: key, type: 'new', level: 'normal', title: `Mail: ${stored.subject}`, body: `Kime: ${stored.to}`, url: '',
+        createdAt: stamp, read: true, silent: true,
+      });
+      saved.nextEventId += 1;
     });
-    return { status: 'opened' };
+    return { status: 'sent' };
+  },
+
+  /** The way out when sending does not work, or the student would rather send it from there. */
+  async openDraftInMailApp(draft: Draft): Promise<{ status: string }> {
+    await approved(draft);
+    return openInMailApp(draft);
   },
 
   async discardDraft(draft: Draft): Promise<{ status: string }> {

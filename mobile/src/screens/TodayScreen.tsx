@@ -15,7 +15,7 @@ import {
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, padding, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
 import type { BuiltinShape } from '@expo/ui/jetpack-compose/modifiers';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ImageSourcePropType } from 'react-native';
 
 import { api, Connection, Exam, GpuState, Upcoming } from '../api';
@@ -195,13 +195,15 @@ function Summary({ upcoming, gpu, now }: { upcoming: Upcoming[]; gpu: GpuState; 
   );
 }
 
+const SCAN_REFRESH_MS = 6000;
+
 export function TodayScreen({ connection, onOpenDrafts }: {
   connection: Connection;
   onOpenDrafts: () => void;
 }) {
   const colors = useMaterialColors();
   const load = useCallback(() => api.today(connection), [connection]);
-  const { data, error, refreshing, refresh } = useLoad(load);
+  const { data, setData, error, refreshing, refresh } = useLoad(load);
   const [open, setOpen] = useState<Upcoming | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [tab, setTab] = useState<'work' | 'exams'>('work');
@@ -243,6 +245,14 @@ export function TodayScreen({ connection, onOpenDrafts }: {
       setTaskError(reason instanceof Error ? reason.message : "Google Tasks'a ulaşılamadı.");
     }
   };
+
+  // The first read of the syllabi goes on behind the screen: it shows what it finds as it finds it, without a spinner.
+  const scanning = !!data?.examsScanning;
+  useEffect(() => {
+    if (!scanning) return;
+    const ticker = setInterval(() => void api.today(connection).then(setData, () => undefined), SCAN_REFRESH_MS);
+    return () => clearInterval(ticker);
+  }, [connection, scanning, setData]);
 
   const exams = useMemo(() => examOrder(data?.exams ?? [], Date.now()), [data]);
   const missing = data?.examsMissing ?? [];
@@ -334,7 +344,9 @@ export function TodayScreen({ connection, onOpenDrafts }: {
           </Text>
         ) : null}
         {tab === 'exams' && data?.examsScanning ? (
-          <Notice>Derslerinin syllabus'larını okuyorum, birkaç dakika sürebilir. Buldukça burada çıkacak.</Notice>
+          <Notice>
+            {`Derslerinin syllabus'larını okuyorum${data.examsScanProgress?.total ? ` (${data.examsScanProgress.done}/${data.examsScanProgress.total})` : ''}. Her dosya biraz sürer, buldukça burada çıkacak.`}
+          </Notice>
         ) : null}
         {tab === 'exams' && data && !data.examsScanning && !exams.length && !missing.length ? (
           <Notice>Henüz sınav tarihi bulamadım. Duyuruları ve syllabus'ları taramaya devam ediyorum.</Notice>

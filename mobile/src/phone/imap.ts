@@ -11,7 +11,6 @@ export class ImapError extends Error {}
 
 export const MAX_MAIL_BYTES = 256 * 1024; // enough for any text; attachments beyond it are not fetched
 const MAX_PER_ROUND = 20; // the phone wakes for a short while, and the rest comes next round
-const FIRST_RUN_MAILS = 30;
 const MAX_LINE_BYTES = 64 * 1024;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -180,7 +179,7 @@ function imapDate(date: Date): string {
 }
 
 /**
- * Mail newer than the cursor, oldest first. Without a cursor it reads the newest mail since a date, so that Kamil knows the last days:
+ * Mail newer than the cursor, oldest first. Without a cursor it reads all the mail since a date, so that Kamil knows the last days:
  * the caller stores those quietly. A new UIDVALIDITY means the server renumbered the folder, so old numbers mean nothing and reading
  * goes on from the newest mail.
  */
@@ -193,7 +192,7 @@ export function fetchMail(
     await session.examine();
     const uids = cursor
       ? (await session.search(`UID ${cursor.lastUid + 1}:*`)).filter((uid) => uid > cursor.lastUid).slice(0, MAX_PER_ROUND) // "n:*" always matches the newest
-      : (await session.search(`SINCE ${imapDate(since)}`)).slice(-FIRST_RUN_MAILS);
+      : await session.search(`SINCE ${imapDate(since)}`);
     const mails: RawMail[] = [];
     for (const uid of uids) mails.push({ uid, uidvalidity, data: await session.fetch(uid) });
     const last = uids.length ? uids[uids.length - 1] : -1;

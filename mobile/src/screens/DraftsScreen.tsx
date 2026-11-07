@@ -13,7 +13,7 @@ import {
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
 import { fillMaxSize, fillMaxWidth, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { api, Connection, Draft } from '../api';
 import { icons } from '../icons';
@@ -34,12 +34,14 @@ function Field({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DraftCard({ draft, busy, sendLabel, onSend, onDiscard }: {
+function DraftCard({ draft, busy, sendLabel, onSend, onDiscard, onOpenInApp }: {
   draft: Draft;
   busy: boolean;
   sendLabel: string;
   onSend: () => void;
   onDiscard: () => void;
+  /** Phone mode: send it from the mail app instead, or edit it there first. */
+  onOpenInApp?: () => void;
 }) {
   const colors = useMaterialColors();
   return (
@@ -75,6 +77,11 @@ function DraftCard({ draft, busy, sendLabel, onSend, onDiscard }: {
           <Text modifiers={[paddingAll(4)]}>{sendLabel}</Text>
         </Button>
       </Row>
+      {onOpenInApp ? (
+        <TextButton enabled={!busy} onClick={onOpenInApp}>
+          <Text>Mail uygulamasında aç</Text>
+        </TextButton>
+      ) : null}
     </Panel>
   );
 }
@@ -85,6 +92,11 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<Draft | null>(null);
+  const [canSend, setCanSend] = useState(connection.mode !== 'phone');
+
+  useEffect(() => {
+    api.canSendMail(connection).then(setCanSend, () => setCanSend(false));
+  }, [connection, data]);
 
   const act = useCallback(
     async (action: () => Promise<unknown>) => {
@@ -107,12 +119,13 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
       <DraftCard
         draft={item}
         busy={busy}
-        sendLabel={connection.mode === 'phone' ? 'Mailde aç' : 'Gönder'}
+        sendLabel={canSend ? 'Gönder' : 'Mailde aç'}
         onSend={() => setConfirming(item)}
+        onOpenInApp={connection.mode === 'phone' && canSend ? () => void act(() => api.openDraftInMailApp(item)) : undefined}
         onDiscard={() => void act(() => api.discardDraft(connection, item))}
       />
     ),
-    [act, busy, connection],
+    [act, busy, canSend, connection],
   );
 
   return (
@@ -123,7 +136,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
         verticalArrangement={{ spacedBy: 12 }}>
         <Header
           title="Onaylar"
-          subtitle={connection.mode === 'phone' ? "Kamil'in taslakları mail uygulamanda açılır, göndermeyi sen yaparsın" : "Kamil'in yazdığı mailler, sen onaylamadan gitmez"}
+          subtitle={!canSend ? "Kamil'in taslakları mail uygulamanda açılır, göndermeyi sen yaparsın" : "Kamil'in yazdığı mailler, sen onaylamadan gitmez"}
         />
         {error ? <Notice tone="error">{error}</Notice> : null}
         {actionError ? <Notice tone="error">{actionError}</Notice> : null}
@@ -144,11 +157,11 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
             <Icon source={icons.send} size={24} />
           </AlertDialog.Icon>
           <AlertDialog.Title>
-            <Text>{connection.mode === 'phone' ? 'Mail uygulamasında açılsın mı?' : 'Mail gönderilsin mi?'}</Text>
+            <Text>{canSend ? 'Mail gönderilsin mi?' : 'Mail uygulamasında açılsın mı?'}</Text>
           </AlertDialog.Title>
           <AlertDialog.Text>
             <Text>
-              {(connection.mode === 'phone'
+              {(!canSend
                 ? `${confirming.to} adresine yazılmış taslak mail uygulamanda açılacak; göndermeden önce son bir kez bak.`
                 : `${confirming.to} adresine okul mailinden gidecek.`) +
                 (confirming.warnings?.length ? `\n\nDikkat: ${confirming.warnings.join(' ')}` : '')}
@@ -161,7 +174,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
                 setConfirming(null);
                 void act(() => api.sendDraft(connection, draft));
               }}>
-              <Text>{connection.mode === 'phone' ? 'Aç' : 'Gönder'}</Text>
+              <Text>{canSend ? 'Gönder' : 'Aç'}</Text>
             </TextButton>
           </AlertDialog.ConfirmButton>
           <AlertDialog.DismissButton>

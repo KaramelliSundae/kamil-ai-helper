@@ -1,4 +1,5 @@
 import {
+  Button,
   Box,
   Column,
   FilledTonalButton,
@@ -37,10 +38,11 @@ import { LinkDialog, MailBody } from './MailBody';
 import { loadMailImage } from './mailImages';
 import { hostOf, linkRisk, LinkRisk, splitSender } from './mailText';
 import { TaskPicker } from './TaskPicker';
+import { replyLink } from './mailThread';
 import { Notice, rounded, shapes } from './ui';
 
 /** What the list already knows, shown until the full record arrives (and kept when there is none). */
-export type DetailTarget = { key: string; title: string; body?: string; url?: string; when?: string };
+export type DetailTarget = { key: string; title: string; body?: string; url?: string; when?: string; earlier?: string[] };
 
 const KIND_NAMES: Record<string, string> = {
   assignment: 'Ödev',
@@ -56,15 +58,19 @@ const UNREADABLE = '(açılamayan mail)';
 const SHEET_GUTTER = 20;
 const CARD_PADDING = 20;
 
-export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose }: {
+export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose, onOpenDrafts }: {
   connection: Connection;
   target: DetailTarget;
   tasksEnabled?: boolean;
   inTasks?: boolean;
   onClose: () => void;
+  /** Where a reply draft waits for approval. */
+  onOpenDrafts?: () => void;
 }) {
   const colors = useMaterialColors();
   const [detail, setDetail] = useState<ItemDetail | null>(null);
+  const [earlier, setEarlier] = useState<ItemDetail[]>([]);
+  const [drafting, setDrafting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [taskAdded, setTaskAdded] = useState(!!inTasks);
@@ -97,6 +103,33 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
       live = false;
     };
   }, [connection, target.key]);
+
+  // The rest of a conversation, oldest first. One that cannot be read just stays out.
+  const earlierKeys = (target.earlier ?? []).join('|');
+  useEffect(() => {
+    let live = true;
+    const keys = earlierKeys ? earlierKeys.split('|') : [];
+    Promise.all(keys.map((key) => api.item(connection, key).catch(() => null))).then((found) => {
+      if (live) setEarlier(found.filter((one): one is ItemDetail => !!one));
+    });
+    return () => {
+      live = false;
+    };
+  }, [connection, earlierKeys]);
+
+  const draftReply = async () => {
+    setError(null);
+    setDrafting(true);
+    try {
+      await api.replyDraft(connection, target.key);
+      onClose();
+      onOpenDrafts?.();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Taslak yazılamadı.');
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const kind = detail?.kind ?? (target.key.startsWith('mail:') ? 'mail' : undefined);
   const mail = kind === 'mail';
@@ -153,6 +186,17 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           </Text>
         </Column>
 
+        {earlier.map((message) => (
+          <Column key={message.key} verticalArrangement={{ spacedBy: 8 }} modifiers={[fillMaxWidth()]}>
+            <SenderRow sender={message.sender} when={message.postedAt} />
+            <Surface color={colors.surfaceContainerLow} shape={rounded(24)} modifiers={[fillMaxWidth()]}>
+              <Column modifiers={[paddingAll(CARD_PADDING)]}>
+                <MailBody body={tidyText(message.body)} />
+              </Column>
+            </Surface>
+          </Column>
+        ))}
+
         {mail && detail ? (
           <SenderRow sender={detail.sender} when={when} />
         ) : (
@@ -198,6 +242,22 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           />
         ) : null}
         <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
+          {mail && detail && replyLink(detail.replyTo, detail.title) ? (
+            <Button
+              onClick={() => {
+                setError(null);
+                Linking.openURL(replyLink(detail.replyTo, detail.title)!).catch(() => setError('Mail uygulaması açılamadı.'));
+              }}>
+              <Icon source={icons.mail} size={18} />
+              <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
+            </Button>
+          ) : null}
+          {mail && detail?.replyTo && connection.mode === 'phone' && onOpenDrafts ? (
+            <FilledTonalButton enabled={!drafting} onClick={() => void draftReply()}>
+              <Icon source={icons.newChat} size={18} />
+              <Text modifiers={[paddingAll(4)]}>{drafting ? 'Taslak yazılıyor…' : 'Taslak oluştur'}</Text>
+            </FilledTonalButton>
+          ) : null}
           {(work && tasksEnabled || remindable) && taskAdded ? (
             <OutlinedButton onClick={() => setConfirmRemove(true)}>
               <Icon source={icons.taskDone} size={18} />

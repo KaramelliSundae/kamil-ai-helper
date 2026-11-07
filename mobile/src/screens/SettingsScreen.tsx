@@ -382,7 +382,7 @@ function PhoneMailPanel({ connection }: { connection: Connection | null }) {
   return (
     <Panel>
       <SectionTitle icon={icons.mail} title="Okul maili" />
-      <Hint>Telefon mailini kendisi okur, yalnızca şifreli bağlantıyla. Okunmamış mail okunmamış kalır; Kamil mail silmez, göndermez. Şifren yalnızca bu telefonda, şifreli durur.</Hint>
+      <Hint>Telefon mailini kendisi okur, yalnızca şifreli bağlantıyla. Okunmamış mail okunmamış kalır, Kamil mail silmez. Yalnızca Onaylar'da Gönder'e bastığın taslağı okul hesabınla yollar. Şifren yalnızca bu telefonda, şifreli durur.</Hint>
       <Field label="Mail sunucusu (IMAP)" placeholder="posta.okulun.edu.tr" state={hostState} onChange={setHost} uri />
       <Field label="Kullanıcı adı veya mail adresi" state={userState} onChange={setUser} uri />
       <Field label={connected ? 'Şifre (değiştirmek için)' : 'Şifre'} state={passwordState} onChange={setPassword} secret />

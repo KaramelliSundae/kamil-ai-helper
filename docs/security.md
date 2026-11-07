@@ -91,7 +91,7 @@ untrusted input, hold private data, and change lasting state all at once.
 - **Drafts.** Kamil cannot send mail. A draft gets a visible warning when its recipient is outside your
   school, when the address was neither typed by you nor the sender of a stored message, or when you never
   asked for a mail. On the server a draft goes out only after you approve it in the app, and only if it is
-  exactly what you saw (hash check). In phone-only mode it opens in your mail app and you send it.
+  exactly what you saw (hash check). In phone-only mode it goes from the phone over TLS after you tap send, with no way to reach it from the model, or opens in your mail app if you choose.
 - **No dangerous tools.** There is no shell, no web access and no Canvas write. The tool list is closed and
   tested.
 - **Output stays inert.** The chat renders no links or images, so an answer cannot leak data without a tap.

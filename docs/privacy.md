@@ -17,7 +17,7 @@ Kamil connects only to the services you set up:
 | Service | What it receives | When |
 | --- | --- | --- |
 | Your school's Canvas | Your token and read requests. Kamil does not submit or change anything there. | At each check |
-| Your school's mail server | Your login and read requests. Kamil opens mail read-only. | At each check, if you added mail |
+| Your school's mail server | Your login and read requests. Kamil opens mail read-only, and sends only a draft you approve. | At each check, if you added mail |
 | The AI provider you chose (Gemini, OpenRouter or another service) | Your questions and the Canvas information Kamil looks up to answer them. Mail, only if you turn on **Okul maili bulut modele gitsin**. The text of an announcement or mail when you tap **Hatırlatıcı ekle**. | When you use these features |
 | Google Tasks | The tasks you choose to add, and changes to them. | Only if you connect your Google account |
 | GitHub | A request for the latest version and its release notes. GitHub can see your IP address. | When Kamil checks for updates |

@@ -73,6 +73,7 @@ export type Today = {
   examsMissing?: { course: string; hint: string }[];
   /** The first read of every course's syllabus is still going on. */
   examsScanning?: boolean;
+  examsScanProgress?: { done: number; total: number };
   /** Tasks whose item or exam has moved since they were added. Nothing changes until the student agrees. */
   tasksOutdated?: { key: string; title: string; from: string; to: string }[];
 };
@@ -89,6 +90,8 @@ export type ItemDetail = {
   grade: string | null;
   submitted: boolean;
   inTasks?: boolean;
+  /** Mail: the address a reply goes to. */
+  replyTo?: string;
   /** Older servers send none. `image` is the hash of a JPEG the server's sandbox re-encoded. */
   attachments?: Attachment[];
 };
@@ -120,6 +123,13 @@ export type EventItem = {
   source?: EventSource;
   /** The item as it is now; absent for events with no item behind them, such as alerts. */
   current?: { postedAt?: string | null; title: string; course: string; dueAt: string | null; submitted: boolean; grade: string | null } | null;
+  /** Mail: the conversation, as its headers name it. Older servers send none, and the subject decides. */
+  thread?: string;
+  /** Mail: it has attachments, and it came from the school's domain. */
+  hasFiles?: boolean;
+  fromSchool?: boolean;
+  /** On a conversation's row: all its events, oldest first. */
+  threadEvents?: EventItem[];
   /** Phone mode: already announced by an exact alarm, so the event list shows it without notifying again. */
   silent?: boolean;
 };

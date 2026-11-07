@@ -119,6 +119,7 @@ function Shell() {
       connection={connection}
       openEventId={openEventId}
       onOpened={clearOpenEvent}
+      onOpenDrafts={() => setTab('drafts')}
     />
   ) : (
     <DraftsScreen connection={connection} />

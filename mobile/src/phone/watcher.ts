@@ -222,6 +222,17 @@ async function examsFromItems(items: CanvasItem[], now: Date): Promise<void> {
 
 let readingSyllabi = false;
 
+const COURSE_TIMEOUT_MS = 4 * 60_000;
+const NEEDS_KEY = 'Gemini anahtarı';
+
+function oneCourse<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('course timed out')), COURSE_TIMEOUT_MS);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Syllabi. The first time every course is read once, whatever the setting, each saved as it is done so a closed app loses
  * little. After that only a course with no syllabus yet, as often as the setting says. A course read before this pass
@@ -244,28 +255,40 @@ async function readSyllabi(settings: PhoneSettings, now: Date, most: number): Pr
     const passStart = Date.parse(started.firstScanStartedAt!);
     let done = 0;
     let finished = true;
-    for (const [id, course] of await activeCourses(creds)) {
-      const row = (await readState()).examCourses?.[String(id)];
-      const waits = firstPass
-        ? row && (row.hasSyllabus || Date.parse(row.checkedAt) >= passStart)
-        : row && (row.hasSyllabus || now.getTime() - Date.parse(row.checkedAt) < every * 86400000);
-      if (waits) continue;
+    const { examCourses: rows = {}, exams = {} } = await readState();
+    const today = now.toISOString().slice(0, 10);
+    const answered = (course: string) => Object.values(exams).some((exam) => exam.course === course && (exam.endsOn ?? exam.startsOn) >= today);
+    const due = [...(await activeCourses(creds))].filter(([id]) => {
+      const row = rows[String(id)];
+      if (!row) return true;
+      if (row.hasSyllabus && answered(row.course)) return false;
+      if (gemini && row.hint.includes(NEEDS_KEY)) return true; // read without a key, and now there is one
+      return firstPass ? Date.parse(row.checkedAt) < passStart : now.getTime() - Date.parse(row.checkedAt) >= every * 86400000;
+    });
+    if (firstPass) {
+      const already = Object.values(rows).filter((row) => (row.hasSyllabus && answered(row.course)) || Date.parse(row.checkedAt) >= passStart).length;
+      await updateState((state) => {
+        state.meta.firstScanProgress = { done: already, total: already + due.length };
+      });
+    }
+    for (const [id, course] of due) {
       if (done >= most) {
         finished = false;
         break;
       }
       let scan: CourseScan;
       try {
-        scan = await scanCourse(creds, id, now, gemini);
+        scan = await oneCourse(scanCourse(creds, id, now, gemini));
       } catch (error) {
         if (error instanceof ScanLater) {
           finished = false;
           break;
         }
-        continue;
+        continue; // a course that hangs or fails does not stop the others, and is tried again later
       }
       done += 1;
       await updateState((state) => {
+        if (state.meta.firstScanProgress) state.meta.firstScanProgress.done += 1;
         state.examCourses ??= {};
         state.examCourses[String(id)] = {
           course, termStart: scan.termStart, hasSyllabus: scan.hasSyllabus, checkedAt: new Date().toISOString(), hint: scan.hint, attendance: scan.attendance,
@@ -303,7 +326,8 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
   let mailFailure: unknown = null;
   if (mailSettings.host && mailSettings.password) {
     try {
-      mail = await readNewMail(mailSettings, (await readState()).meta.mailCursor ?? null, now);
+      const { meta } = await readState();
+      mail = await readNewMail(mailSettings, meta.mailWindowRead ? meta.mailCursor ?? null : null, now);
     } catch (error) {
       mailFailure = error;
     }
@@ -340,13 +364,15 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
         addEvent(state, { itemKey: 'system:mail', type: 'alert', level: 'high', title: 'Mail takibi çalışmıyor', body: state.meta.mailError, url: '', createdAt: stamp });
       }
     } else if (mail) {
-      const firstRun = !state.meta.mailCursor; // the last days are read quietly, so a new account does not ring for all of them
+      const firstRun = !state.meta.mailWindowRead; // the last days are read quietly, so a new account does not ring for all of them
       for (const item of mail.items) {
         for (const change of upsert(state, item, stamp)) {
           if (!firstRun) recordChange(state, item, change, now);
         }
       }
       state.meta.mailCursor = mail.cursor;
+      state.meta.mailWindowRead = true;
+      if (firstRun && state.meta.backfilled) state.meta.backfilled.mail = false;
       backfill(state, 'mail', now);
       state.meta.mailFailures = 0;
       state.meta.mailError = undefined;

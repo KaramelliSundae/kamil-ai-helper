@@ -23,6 +23,11 @@ export type StoredItem = {
   submitted: boolean;
   /** Mail only: how important it looked. */
   level?: string;
+  /** Mail only: the conversation, and the address a reply goes to. */
+  thread?: string;
+  replyTo?: string;
+  messageId?: string;
+  references?: string;
   firstSeen: string;
   lastSeen: string;
 };
@@ -36,7 +41,11 @@ export type StoredDraft = {
   body: string;
   createdAt: string;
   warnings: string[];
-  status: 'pending' | 'opened' | 'discarded';
+  status: 'pending' | 'opened' | 'sent' | 'discarded';
+  /** A reply: what ties it to its conversation, here and in the recipient's mail. */
+  thread?: string;
+  inReplyTo?: string;
+  references?: string;
 };
 
 export type StoredExam = FoundExam & { course: string };
@@ -65,12 +74,15 @@ export type PhoneState = {
     /** The one read of every course's syllabus, after connecting. */
     firstScanStartedAt?: string;
     firstScanDone?: boolean;
+    firstScanProgress?: { done: number; total: number };
     lastPollAt?: string;
     lastError?: string;
     canvasFailures?: number;
     mailCursor?: { uidvalidity: number; lastUid: number };
     /** The last two weeks went in the list once, by source. */
     backfilled?: { canvas?: boolean; mail?: boolean };
+    /** The first read took every mail of its two weeks, with what conversations need. Older installs read once more. */
+    mailWindowRead?: boolean;
     mailFailures?: number;
     mailError?: string;
     firstName?: string;
