@@ -4,7 +4,7 @@
  */
 import { Linking } from 'react-native';
 
-import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, ItemDetail, TaskOption, Today } from '../types';
+import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, Gradebook, ItemDetail, TaskOption, Today } from '../types';
 import { isOutgoing, plainSubject } from '../mailThread';
 import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
@@ -149,6 +149,11 @@ export const phoneApi = {
           : null,
       };
     });
+  },
+
+  async grades(): Promise<Gradebook> {
+    const { gradebook } = await readState();
+    return gradebook ?? { updatedAt: null, courses: [] };
   },
 
   async refreshEvents(): Promise<{ refreshed: boolean }> {

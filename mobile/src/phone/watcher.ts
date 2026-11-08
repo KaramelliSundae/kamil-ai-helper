@@ -6,6 +6,7 @@
 import * as Notifications from 'expo-notifications';
 
 import type { EventItem } from '../types';
+import type { GradeCourse } from '../types';
 import { activeCourses, CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
 import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, ScanLater, TRUST } from './exams';
 import { ImapAuthError, MailItem, mailProblem, readNewMail, readSentMail } from './mail';
@@ -326,9 +327,10 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
   const settings = await loadPhoneSettings();
   if (!settings.canvasUrl || !settings.canvasToken) return { items: 0, events: 0, error: 'Canvas ayarlı değil' };
   let items: CanvasItem[] = [];
+  const gradebook: GradeCourse[] = [];
   let failure: unknown = null;
   try {
-    items = await fetchCanvas({ url: settings.canvasUrl, token: settings.canvasToken }, now);
+    items = await fetchCanvas({ url: settings.canvasUrl, token: settings.canvasToken }, now, gradebook);
   } catch (error) {
     failure = error;
   }
@@ -366,6 +368,7 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
         }
       }
       state.meta.baselineAt ??= stamp;
+      state.gradebook = { updatedAt: stamp, courses: gradebook };
       backfill(state, 'canvas', now);
       state.meta.canvasFailures = 0;
       state.meta.lastError = undefined;

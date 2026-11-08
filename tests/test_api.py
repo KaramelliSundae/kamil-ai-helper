@@ -73,7 +73,7 @@ ROUTES = [
     ("get", "/v1/images/" + "a" * 64), ("get", "/v1/settings/gemini"), ("put", "/v1/settings/gemini"),
     ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"), ("get", "/v1/settings/cloud/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
-    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
+    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"), ("get", "/v1/grades"),
     ("put", "/v1/drafts/x"), ("post", "/v1/drafts/x/opened"), ("get", "/v1/mail/can-send"),
     ("post", "/v1/mail/reply-text"), ("post", "/v1/mail/reply"), ("post", "/v1/mail/reply/send"),
 ]
@@ -307,6 +307,12 @@ def test_old_notifications_count_as_read_after_the_upgrade(tmp_path):
     store.add_event("b", "new", "high", "t", "b", "", datetime.now(UTC))
     assert store.recent_events(5)[0]["read_at"] is None
     store.close()
+
+
+def test_grades_are_read_from_the_last_round(client, db):
+    assert client.get("/v1/grades", headers=AUTH).json() == {"updatedAt": None, "courses": []}
+    db.set_meta("gradebook", '{"updatedAt": "x", "courses": [{"id": 1, "name": "A", "rows": []}]}')
+    assert client.get("/v1/grades", headers=AUTH).json()["courses"][0]["name"] == "A"
 
 
 def test_gpu_counts_what_was_done_today(api_settings, sends, db):

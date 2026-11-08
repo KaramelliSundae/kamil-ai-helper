@@ -2,8 +2,6 @@ import {
   Box,
   Button,
   Column,
-  DropdownMenu,
-  DropdownMenuItem,
   FilledTonalButton,
   FilterChip,
   HorizontalPager,
@@ -30,6 +28,8 @@ import { icons } from '../icons';
 import { collapseThreads } from '../mailThread';
 import { Choices, groupedShape, Header, Notice, Refreshable, rounded, ShapeIcon, shapes } from '../ui';
 import { useLoad } from '../useLoad';
+import { CoursePicker } from './CoursePicker';
+import { GradesView } from './GradesView';
 
 /** An event from an older server has no list of its own, so its key decides. */
 function sourceOf(event: EventItem): EventSource {
@@ -200,61 +200,6 @@ function SwipeRow({ item, now, shape, onOpen, onDelete, onToggleRead }: {
   );
 }
 
-const COURSE_CHIP_CHARS = 18;
-
-/** Courses as a menu rather than a row of their own: their names are long, and the list needs the room. */
-function CoursePicker({ courses, course, onChange }: {
-  courses: string[];
-  course: string | null;
-  onChange: (course: string | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const pick = (next: string | null) => {
-    setOpen(false);
-    onChange(next);
-  };
-  const name = course && course.length > COURSE_CHIP_CHARS ? `${course.slice(0, COURSE_CHIP_CHARS - 1).trimEnd()}…` : course;
-  return (
-    <DropdownMenu expanded={open} onDismissRequest={() => setOpen(false)}>
-      <DropdownMenu.Trigger>
-        <FilterChip selected={!!course} onClick={() => setOpen(true)}>
-          <FilterChip.Label>
-            <Text>{name ?? 'Tüm dersler'}</Text>
-          </FilterChip.Label>
-          <FilterChip.TrailingIcon>
-            <Icon source={icons.arrowDown} size={18} />
-          </FilterChip.TrailingIcon>
-        </FilterChip>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Items>
-        <DropdownMenuItem onClick={() => pick(null)}>
-          <DropdownMenuItem.LeadingIcon>
-            <Icon source={icons.school} size={20} />
-          </DropdownMenuItem.LeadingIcon>
-          <DropdownMenuItem.Text>
-            <Text>Tüm dersler</Text>
-          </DropdownMenuItem.Text>
-        </DropdownMenuItem>
-        {courses.map((option) => (
-          <DropdownMenuItem key={option} onClick={() => pick(option)}>
-            <DropdownMenuItem.LeadingIcon>
-              <Icon source={courseIcon(option)} size={20} />
-            </DropdownMenuItem.LeadingIcon>
-            <DropdownMenuItem.Text>
-              <Text>{option}</Text>
-            </DropdownMenuItem.Text>
-            {option === course ? (
-              <DropdownMenuItem.TrailingIcon>
-                <Icon source={icons.taskDone} size={20} />
-              </DropdownMenuItem.TrailingIcon>
-            ) : null}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenu.Items>
-    </DropdownMenu>
-  );
-}
-
 export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }: {
   connection: Connection;
   /** A tapped phone notification: its details open as soon as the list has it. */
@@ -265,6 +210,9 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
   const colors = useMaterialColors();
   const load = useCallback(() => api.events(connection), [connection]);
   const { data, setData, error, refreshing, refresh } = useLoad(load);
+  const loadGrades = useCallback(() => api.grades(connection), [connection]);
+  const grades = useLoad(loadGrades);
+  const [showGrades, setShowGrades] = useState(false);
   const [open, setOpen] = useState<EventItem | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -288,8 +236,8 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
       const result = await api.refreshEvents(connection).catch(() => ({ refreshed: false }));
       setStale(!result.refreshed);
       return api.events(connection);
-    });
-  }, [connection, refresh]);
+    }).then(() => grades.refresh());
+  }, [connection, grades, refresh]);
 
   const remove = useCallback(
     async (event: EventItem) => {
@@ -344,6 +292,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
     const tapped = collapseThreads(data, arrivedAt).find((event) => (event.threadEvents ?? [event]).some((one) => one.id === openEventId));
     if (tapped) {
       setList(sourceOf(tapped));
+      setShowGrades(false);
       setFilter('all');
       setCourse(null);
       openEvent(tapped);
@@ -420,7 +369,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
         <Column modifiers={[fillMaxWidth(), padding(16, 0, 16, 10)]} verticalArrangement={{ spacedBy: 10 }}>
           <Header
             title="Bildirimler"
-            actions={(
+            actions={showGrades ? null : (
               <>
                 {unreadIn(list) ? (
                   <IconButton onClick={() => void markAllRead()}>
@@ -436,14 +385,27 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
             )}
           />
           <Choices
-            value={list}
-            onChange={switchList}
+            value={showGrades ? 'grades' : list}
+            onChange={(next: EventSource | 'grades') => {
+              if (next === 'grades') {
+                setShowGrades(true);
+                return;
+              }
+              setShowGrades(false);
+              switchList(next);
+            }}
             options={[
               { value: 'canvas', label: 'Canvas', count: unreadIn('canvas') },
               { value: 'mail', label: 'E-posta', count: unreadIn('mail') },
+              // The Grades page of Canvas as a table. It only shows; grade notifications arrive as before.
+              { value: 'grades', label: 'Notlar', count: 0 },
             ]}
           />
         </Column>
+        {showGrades ? (
+          <GradesView gradebook={grades.data} error={grades.error} />
+        ) : (
+          <>
         <LazyRow modifiers={[fillMaxWidth()]} contentPadding={{ start: 16, end: 16 }} horizontalArrangement={{ spacedBy: 8 }}>
           {courses.length > 1 ? <CoursePicker courses={courses} course={course} onChange={setCourse} /> : null}
           <FilterChip key="all" selected={filter === 'all'} onClick={() => setFilter('all')}>
@@ -484,6 +446,8 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
             {renderEntry}
           </LazyColumn.Items>
         </LazyColumn>
+          </>
+        )}
       </Column>
       {clearing ? (
         <ConfirmDialog

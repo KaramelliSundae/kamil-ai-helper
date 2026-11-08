@@ -475,6 +475,12 @@ def create_app(
             for row in store.recent_events(min(limit, 200))
         ]
 
+    @app.get("/v1/grades", dependencies=guarded)
+    def grades(store: Db) -> dict[str, Any]:
+        """Canvas's Grades tables as the last watcher round saw them. Showing them adds no notification."""
+        raw = store.get_meta("gradebook")
+        return json.loads(raw) if raw else {"updatedAt": None, "courses": []}
+
     @app.post("/v1/events/refresh", dependencies=guarded)
     def refresh_events(store: Db) -> dict[str, bool]:
         """Asks for a watcher round now and waits for it. This service holds no Canvas token: it only writes a

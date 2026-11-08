@@ -3,6 +3,7 @@
  * including submitting work, so this client only ever sends GET. It follows pagination only within the
  * Canvas host, because the token goes with every request. Mirrors ai_ders/canvas.py.
  */
+import type { GradeCourse, GradeRow } from '../types';
 import { htmlToText } from './text';
 
 const PER_PAGE = 100;
@@ -155,14 +156,35 @@ function assignmentItem(row: Row, course: string): CanvasItem {
   };
 }
 
+/** One line of Canvas's Grades page. Only for showing: it never becomes a notification. */
+function gradeRow(row: Row, groups: Map<number, string>): GradeRow {
+  const submission = row.submission ?? {};
+  const excused = !!submission.excused;
+  const score = typeof submission.score === 'number' ? submission.score : null;
+  return {
+    name: row.name || '(adsız)',
+    group: groups.get(row.assignment_group_id) ?? '',
+    url: row.html_url || '',
+    dueAt: row.due_at || null,
+    submittedAt: submission.submitted_at || null,
+    status: excused ? 'excused' : submission.missing ? 'missing' : submission.late ? 'late' : '',
+    score: excused ? null : score,
+    points: typeof row.points_possible === 'number' ? row.points_possible : null,
+    waiting: score === null && !excused && !!submission.submitted_at,
+  };
+}
+
 /** Everything the watcher looks at, newest records winning when a task is listed twice. */
-export async function fetchCanvas(creds: Creds, now: Date): Promise<CanvasItem[]> {
+export async function fetchCanvas(creds: Creds, now: Date, gradebook?: GradeCourse[]): Promise<CanvasItem[]> {
   const byId = await courses(creds);
   const items: CanvasItem[] = [];
   for (const [id, name] of byId) {
-    for (const row of await list(creds, `/api/v1/courses/${id}/assignments`, { 'include[]': 'submission' })) {
-      items.push(assignmentItem(row, name));
-    }
+    const rows = await list(creds, `/api/v1/courses/${id}/assignments`, { 'include[]': 'submission' });
+    for (const row of rows) items.push(assignmentItem(row, name));
+    const groups = new Map<number, string>(
+      (await optional(() => list(creds, `/api/v1/courses/${id}/assignment_groups`), [] as Row[])).map((g) => [g.id as number, (g.name as string) || '']),
+    );
+    gradebook?.push({ id, name, rows: rows.map((row) => gradeRow(row, groups)) });
   }
   if (byId.size) {
     const start = new Date(now.getTime() - ANNOUNCEMENT_DAYS * 864e5).toISOString();

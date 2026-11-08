@@ -139,6 +139,22 @@ export type EventItem = {
   /** Phone mode: already announced by an exact alarm, so the event list shows it without notifying again. */
   silent?: boolean;
 };
+/** One line of Canvas's Grades page. Only shown: it never makes a notification. */
+export type GradeRow = {
+  name: string;
+  /** The assignment group Canvas files it under, such as "Assignments". */
+  group?: string;
+  url: string;
+  dueAt: string | null;
+  submittedAt: string | null;
+  status: 'late' | 'missing' | 'excused' | '';
+  score: number | null;
+  points: number | null;
+  /** Handed in and not marked yet. */
+  waiting: boolean;
+};
+export type GradeCourse = { id: number; name: string; rows: GradeRow[] };
+export type Gradebook = { updatedAt: string | null; courses: GradeCourse[] };
 export type ChatMessage = { id: number; role: 'user' | 'assistant'; content: string };
 export type Release = { versionCode: number; versionName: string; sha256: string; size: number; source?: 'server' | 'github' };
 export type Draft = {

@@ -10,6 +10,7 @@ import type {
   EventItem,
   EventSource,
   GeminiSettings,
+  Gradebook,
   GpuState,
   ItemDetail,
   ModelId,
@@ -85,6 +86,8 @@ async function request<T>(connection: ServerConnection, path: string, method: st
 export const api = {
   today: (c: Connection) => (c.mode === 'phone' ? phoneApi.today() : request<Today>(c, '/v1/today', 'GET')),
   events: (c: Connection) => (c.mode === 'phone' ? phoneApi.events() : request<EventItem[]>(c, '/v1/events', 'GET')),
+  /** Canvas's Grades tables as the last round saw them. Reading them never notifies anyone. */
+  grades: (c: Connection) => (c.mode === 'phone' ? phoneApi.grades() : request<Gradebook>(c, '/v1/grades', 'GET')),
   /** Asks for a fresh look at Canvas and mail now; the list is then read with `events`. */
   refreshEvents: (c: Connection) =>
     c.mode === 'phone' ? phoneApi.refreshEvents() : request<{ refreshed: boolean }>(c, '/v1/events/refresh', 'POST'),

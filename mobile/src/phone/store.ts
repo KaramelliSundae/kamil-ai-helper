@@ -5,7 +5,7 @@
  */
 import { File, Paths } from 'expo-file-system';
 
-import type { EventItem } from '../types';
+import type { EventItem, GradeCourse } from '../types';
 import type { AttendanceNote } from './attendance';
 import type { FoundExam } from './exams';
 
@@ -57,6 +57,8 @@ export type PhoneState = {
   nextEventId: number;
   /** Absent in data saved before exams existed. */
   exams?: Record<string, StoredExam>;
+  /** Canvas's Grades tables as the last round saw them. */
+  gradebook?: { updatedAt: string; courses: GradeCourse[] };
   examCourses?: Record<string, { course: string; termStart: string | null; hasSyllabus: boolean; checkedAt: string; hint: string; attendance?: AttendanceNote[] }>;
   conversations: StoredConversation[];
   chat: StoredChat[];

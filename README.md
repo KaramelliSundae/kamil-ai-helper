@@ -150,7 +150,10 @@ With Google Tasks connected, a mail or an announcement has **Hatırlatıcı ekle
 first. The chips above the list narrow it by kind or by course and say how many each holds. Opening a notification marks it
 read; the two buttons at the top mark a whole list read or delete what you have read in it. Pull down to check Canvas and mail
 right away. Each notification shows what holds now, not just what was true when it arrived: time left, *Süresi geçti*,
-*Teslim edildi* or the grade. Slide a notification sideways for **Okundu** and **Sil**. While Kamil answers, the chat shows each
+*Teslim edildi* or the grade. Slide a notification sideways for **Okundu** and **Sil**.
+**Notlar**, the third choice beside Canvas and E-posta, shows Canvas's Grades page as a table, one course at a time: due date,
+when you handed it in, *geç* or *eksik*, and the score. It is read in the same round as everything else, in server mode and
+phone mode alike, and it only displays: a new grade still notifies exactly once, as before, never a second time because of the table. While Kamil answers, the chat shows each
 step it is taking.
 
 ## Sharing the GPU

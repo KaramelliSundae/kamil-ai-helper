@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 from ai_ders.canvas import CanvasAuthError, CanvasError
@@ -22,8 +23,8 @@ class FakeCanvas:
             raise self.error
         return {1: "COMP303"}
 
-    def assignments(self, course_id, course):
-        return self.assignments_list
+    def assignments_and_grades(self, course_id, course):
+        return self.assignments_list, []
 
     def announcements(self, courses, start, end):
         return self.announcements_list
@@ -289,3 +290,38 @@ def test_old_items_table_gains_attachments_and_keeps_its_rows(settings):
     row = store.get_item("mail:5:1")
     assert row["body"] == "Metin" and Store.attachments(row) == []
     store.close()
+
+
+def test_grades_table_is_kept_without_any_notification(store, settings):
+    import httpx
+
+    from ai_ders.canvas import CanvasClient
+
+    submission = {"workflow_state": "graded", "grade": "50", "score": 50, "late": True, "submitted_at": "2026-10-13T00:03:00Z"}
+    rows = [
+        {"id": 1, "assignment_group_id": 7, "name": "Assignment 1", "due_at": "2026-10-05T20:59:00Z", "points_possible": 100, "submission": submission},
+        {"id": 2, "name": "Lab 2", "due_at": "2026-10-12T15:00:00Z", "points_possible": 100, "submission": {"missing": True}},
+        {"id": 3, "name": "Lab 1", "points_possible": 100, "submission": {"submitted_at": "2026-10-08T10:26:00Z"}},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/courses":
+            return httpx.Response(200, json=[{"id": 1, "name": "COMP303"}])
+        if request.url.path.endswith("/assignment_groups"):
+            return httpx.Response(200, json=[{"id": 7, "name": "Assignments"}])
+        if request.url.path.endswith("/assignments"):
+            return httpx.Response(200, json=rows)
+        return httpx.Response(200, json=[])
+
+    canvas = CanvasClient("https://canvas.uni.example.edu", "t", transport=httpx.MockTransport(handler))
+    gradebook: list[dict] = []
+    run_poll(store, settings, canvas, None, NOW)  # the first round is quiet
+    assert events(store) == []
+    assert poll_canvas(canvas, NOW, gradebook)
+    table = {row["name"]: row for row in gradebook[0]["rows"]}
+    assert table["Assignment 1"]["status"] == "late" and table["Assignment 1"]["score"] == 50
+    assert table["Assignment 1"]["group"] == "Assignments" and table["Lab 1"]["group"] == ""
+    assert table["Lab 2"]["status"] == "missing" and table["Lab 2"]["score"] is None
+    assert table["Lab 1"]["waiting"] is True
+    assert json.loads(store.get_meta("gradebook"))["courses"][0]["name"] == "COMP303"
+    assert events(store) == []  # a table adds no notification: "Not girildi" still comes only from the watcher's change

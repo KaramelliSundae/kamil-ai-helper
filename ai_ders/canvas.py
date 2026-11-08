@@ -103,8 +103,13 @@ class CanvasClient:
         return {row["id"]: row.get("name") or str(row["id"]) for row in rows if not row.get("access_restricted_by_date")}
 
     def assignments(self, course_id: int, course: str) -> list[Item]:
+        return self.assignments_and_grades(course_id, course)[0]
+
+    def assignments_and_grades(self, course_id: int, course: str) -> tuple[list[Item], list[dict[str, Any]]]:
+        """One request gives both the items the watcher follows and the lines of the Grades page."""
         rows = self._list(f"/api/v1/courses/{course_id}/assignments", {"include[]": "submission"})
-        return [assignment_item(row, course) for row in rows]
+        groups = {g["id"]: g.get("name") or "" for g in self._optional_list(f"/api/v1/courses/{course_id}/assignment_groups")}
+        return [assignment_item(row, course) for row in rows], [grade_row(row, groups) for row in rows]
 
     def announcements(self, courses: dict[int, str], start: datetime, end: datetime) -> list[Item]:
         if not courses:
@@ -215,6 +220,26 @@ def assignment_item(row: dict[str, Any], course: str) -> Item:
         grade=str(submission["grade"]) if graded else None,
         submitted=submission.get("workflow_state") in SUBMITTED_STATES or bool(submission.get("submitted_at")),
     )
+
+
+def grade_row(row: dict[str, Any], groups: dict[int, str] | None = None) -> dict[str, Any]:
+    """One line of Canvas's Grades page. Only for showing: it never becomes a notification."""
+    submission = row.get("submission") or {}
+    excused = bool(submission.get("excused"))
+    status = "excused" if excused else "missing" if submission.get("missing") else "late" if submission.get("late") else ""
+    score = submission.get("score")
+    return {
+        "name": row.get("name") or "(adsız)",
+        "group": (groups or {}).get(row.get("assignment_group_id"), ""),
+        "url": row.get("html_url") or "",
+        "dueAt": row.get("due_at"),
+        "submittedAt": submission.get("submitted_at"),
+        "status": status,
+        "score": None if excused or score is None else score,
+        "points": row.get("points_possible"),
+        # Handed in and waiting for a mark: Canvas shows a document icon here.
+        "waiting": score is None and not excused and bool(submission.get("submitted_at")),
+    }
 
 
 def announcement_item(row: dict[str, Any], courses: dict[int, str]) -> Item:

@@ -6,6 +6,7 @@ failing raises an alert, because a silently expired token is exactly how things 
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -123,11 +124,15 @@ def keep_sent(store: Store, mailbox: Mailbox, now: datetime) -> None:
     store.set_meta("sent_cursor", f"{new_cursor.uidvalidity}:{new_cursor.last_uid}")
 
 
-def poll_canvas(canvas: CanvasClient, now: datetime) -> list[Item]:
+def poll_canvas(canvas: CanvasClient, now: datetime, gradebook: list[dict] | None = None) -> list[Item]:
+    """`gradebook`, when given, is filled with each course's Grades table from the same requests."""
     courses = canvas.courses()
     items: list[Item] = []
     for course_id, name in courses.items():
-        items.extend(canvas.assignments(course_id, name))
+        found, rows = canvas.assignments_and_grades(course_id, name)
+        items.extend(found)
+        if gradebook is not None:
+            gradebook.append({"id": course_id, "name": name, "rows": rows})
     items.extend(canvas.announcements(courses, now - timedelta(days=ANNOUNCEMENT_DAYS), now))
     items.extend(canvas.planner_items(courses, now - timedelta(days=1), now + timedelta(days=PLANNER_DAYS)))
     items.extend(canvas.messages())
@@ -250,7 +255,8 @@ def run_poll(
 
     if canvas is not None:
         try:
-            items = poll_canvas(canvas, now)
+            gradebook: list[dict] = []
+            items = poll_canvas(canvas, now, gradebook)
         except CanvasAuthError as error:
             record_failure(store, "Canvas", error, now, immediate=True)
             result.errors.append(str(error))
@@ -262,6 +268,7 @@ def run_poll(
             result.events += ingest(store, settings, items, now, baseline)
             result.items += len(items)
             store.set_meta("canvas_baseline", to_text(now))
+            store.set_meta("gradebook", json.dumps({"updatedAt": to_text(now), "courses": gradebook}, ensure_ascii=False))
             clear_failure(store, "Canvas")
             try:
                 result.events += update_exams(store, settings, canvas, items, read_document or read_here, now)
