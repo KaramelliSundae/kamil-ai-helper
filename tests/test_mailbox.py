@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import format_datetime
 
-from ai_ders.mailbox import MAX_BODY_BYTES, MAX_PER_POLL, UNREADABLE, Cursor, Mailbox
+from ai_ders.mailbox import MAX_BODY_BYTES, MAX_PER_POLL, MAX_SENT_PER_POLL, UNREADABLE, Cursor, Mailbox
 from ai_ders.mailparse import MailParseError, SandboxUnavailable, parse_here
 from ai_ders.models import HIGH, NORMAL
 
@@ -49,13 +49,18 @@ class FakeBox:
         self.logged_out = False
         self.client = FakeClient(self)
         status = {"UIDVALIDITY": uidvalidity, "UIDNEXT": uidnext}
-        self.folder = type("Folder", (), {"set": self._select, "status": lambda _self, folder, names: status})()
+        self.folders: list = []
+        self.selected: str | None = None
+        self.folder = type("Folder", (), {
+            "set": self._select, "status": lambda _self, folder, names: status, "list": lambda _self: self.folders,
+        })()
 
     def __call__(self, **kwargs):
         return self
 
     def _select(self, folder, readonly=False):
         self.readonly = readonly
+        self.selected = folder
 
     def login(self, user, password, initial_folder="INBOX"):
         self.initial_folder = initial_folder
@@ -185,3 +190,54 @@ def test_plain_only_mail_loses_windows_line_ends_and_blank_runs():
     raw = raw_mail(text="Merhaba,\r\n\r\n\r\n\r\nVize Salı.  \r\n")
     items, _ = mailbox_for(FakeBox({101: raw})).fetch_new(Cursor(5, 100))
     assert items[0].body == "Merhaba,\n\nVize Salı."
+
+
+def folder(name, *flags, delim="/"):
+    return type("FolderInfo", (), {"name": name, "flags": flags, "delim": delim})()
+
+
+def sent_mail(subject="Re: Vize", message_id="<s1@uni.example.edu>") -> bytes:
+    message = EmailMessage()
+    message["From"] = "ogrenci@uni.example.edu"
+    message["To"] = "Hoca <hoca@uni.example.edu>"
+    message["Subject"] = subject
+    message["Message-ID"] = message_id
+    message["In-Reply-To"] = "<b@uni.example.edu>"
+    message["References"] = "<a@uni.example.edu> <b@uni.example.edu>"
+    message["Date"] = format_datetime(datetime(2026, 11, 3, 10, 0, tzinfo=UTC))
+    message.set_content("Teşekkürler")
+    return message.as_bytes()
+
+
+def test_the_sent_folder_is_found_by_its_flag_then_by_name():
+    box = FakeBox({7: sent_mail()}, uidnext=8)
+    box.folders = [folder("INBOX"), folder("Gönderilmiş"), folder("Giden", "\\Sent")]
+    items, cursor = mailbox_for(box).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC))
+    assert box.selected == "Giden" and box.readonly is True and box.initial_folder is None
+    item, = items
+    assert (item.key, item.sender, item.reply_to, item.level) == ("mail:out:5:7", "Sen", "hoca@uni.example.edu", NORMAL)
+    assert (item.thread, item.message_id) == ("<a@uni.example.edu>", "<s1@uni.example.edu>")
+    assert cursor == Cursor(5, 7) and box.logged_out
+
+
+def test_a_sent_folder_named_like_the_phone_expects():
+    box = FakeBox({}, uidnext=1)
+    box.folders = [folder("INBOX"), folder("INBOX/Sent Items")]
+    assert mailbox_for(box).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC)) == ([], Cursor(5, 0))
+    assert box.selected == "INBOX/Sent Items"
+
+
+def test_no_sent_folder_is_not_an_error_and_none_is_made():
+    box = FakeBox({})
+    box.folders = [folder("INBOX"), folder("Arşiv")]
+    assert mailbox_for(box).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC)) is None
+    assert box.selected is None and box.logged_out
+
+
+def test_sent_mail_is_read_a_few_at_a_time():
+    box = FakeBox({uid: sent_mail() for uid in range(1, 51)}, uidnext=51)
+    box.folders = [folder("Sent", "\\Sent")]
+    first, cursor = mailbox_for(box).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC))
+    assert len(first) == MAX_SENT_PER_POLL and cursor == Cursor(5, 50)  # history: only the newest few
+    later, cursor = mailbox_for(box).fetch_sent(Cursor(5, 10), datetime(2026, 10, 20, tzinfo=UTC))
+    assert len(later) == MAX_SENT_PER_POLL and cursor == Cursor(5, 10 + MAX_SENT_PER_POLL)  # the rest next round

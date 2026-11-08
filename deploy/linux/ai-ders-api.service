@@ -10,9 +10,9 @@ StateDirectory=ai-ders
 StateDirectoryMode=0700
 EnvironmentFile=/etc/ai-ders/env
 Environment=PYTHONUNBUFFERED=1
-# The Canvas token stays out of here: the agent reads what the watcher already stored.
+# The Canvas token stays out of here: the agent reads what the watcher already stored. So does the mail
+# password: an approved mail goes to ai-ders-mailsend.socket, whose own sandbox sends it.
 LoadCredentialEncrypted=api_token:/etc/ai-ders/creds/api_token.cred
-LoadCredentialEncrypted=mail_password:/etc/ai-ders/creds/mail_password.cred
 ExecStart=/opt/ai-ders/.venv/bin/uvicorn --factory ai_ders.api:create_app --host ${API_HOST} --port 8420 --no-server-header
 Restart=always
 RestartSec=5

@@ -18,6 +18,7 @@ from typing import Any, Callable
 from imap_tools import AND, MailBox, U
 
 from .mailparse import MAX_INPUT_BYTES, MailParseError, ParsedMail, Parser
+from .mailthread import find_sent_folder, first_message_id, thread_of
 from .models import NORMAL, Item
 from .rules import mail_level
 
@@ -25,8 +26,13 @@ log = logging.getLogger(__name__)
 
 FOLDER = "INBOX"
 MAX_PER_POLL = 100
+# Each mail is read in its own sandbox (about 1.5 s in a microVM), and the student's own mails are only the other half of
+# each conversation: a few per round keeps the whole poll well inside its time limit, and the cursor catches up.
+MAX_SENT_PER_POLL = 20
 MAX_BODY_BYTES = MAX_INPUT_BYTES
 UNREADABLE = "(açılamayan mail)"
+# Mail the student sent, so a conversation shows both sides. The app knows these by this prefix.
+OUTGOING_PREFIX = "mail:out:"
 
 
 @dataclass(frozen=True)
@@ -46,6 +52,29 @@ def mail_item(parsed: ParsedMail, uid: int, uidvalidity: int, now: datetime) -> 
         posted_at=parsed.date or now,
         level=mail_level(parsed.from_, subject, parsed.body, parsed.headers),
         attachments=parsed.attachments,
+        thread=thread_of(parsed.headers, parsed.subject),
+        # Not the Reply-To header: anyone can write there, and a reply should go to who it seems to come from.
+        reply_to=parsed.from_,
+        message_id=first_message_id(parsed.headers.get("message-id")),
+        references=parsed.headers.get("references", ""),
+    )
+
+
+def sent_item(parsed: ParsedMail, uid: int, uidvalidity: int, now: datetime) -> Item:
+    """One of the student's own mails, as the other half of a conversation: never a row of its own."""
+    return Item(
+        key=f"{OUTGOING_PREFIX}{uidvalidity}:{uid}",
+        kind="mail",
+        title=parsed.subject or "(konusuz)",
+        sender="Sen",
+        body=parsed.body.strip(),
+        posted_at=parsed.date or now,
+        level=NORMAL,
+        attachments=parsed.attachments,
+        thread=thread_of(parsed.headers, parsed.subject),
+        reply_to=parsed.to,
+        message_id=first_message_id(parsed.headers.get("message-id")),
+        references=parsed.headers.get("references", ""),
     )
 
 
@@ -70,16 +99,39 @@ class Mailbox:
         self.image_dir = image_dir
         self.factory = factory
 
-    def _connect(self) -> Any:
+    def _connect(self, folder: str | None = FOLDER) -> Any:
         box = self.factory(host=self.host, port=self.port, timeout=60, ssl_context=ssl.create_default_context())
         box.login(self.user, self.password, initial_folder=None)
-        box.folder.set(FOLDER, readonly=True)
+        if folder is not None:
+            box.folder.set(folder, readonly=True)
         return box
 
     def check(self) -> dict[str, int]:
         box = self._connect()
         try:
             return box.folder.status(FOLDER, ["MESSAGES", "UNSEEN"])
+        finally:
+            box.logout()
+
+    def fetch_sent(self, cursor: Cursor | None, since: datetime) -> tuple[list[Item], Cursor] | None:
+        """The student's own mails since the cursor, or since `since` on a first run. None when this mailbox
+        has no Sent folder: that's only the other half of each conversation, and the inbox goes on without it."""
+        box = self._connect(folder=None)
+        try:
+            folder = find_sent_folder(list(box.folder.list()))
+            if folder is None:
+                return None
+            box.folder.set(folder, readonly=True)
+            status = box.folder.status(folder, ["UIDVALIDITY", "UIDNEXT"])
+            uidvalidity, uidnext = int(status["UIDVALIDITY"]), int(status["UIDNEXT"])
+            if cursor is None or cursor.uidvalidity != uidvalidity:
+                uids = sorted(map(int, box.uids(AND(date_gte=since.date()))))[-MAX_SENT_PER_POLL:]
+                last = max([uidnext - 1, *uids])
+            else:
+                uids = sorted(uid for uid in map(int, box.uids(AND(uid=U(str(cursor.last_uid + 1), "*")))) if uid > cursor.last_uid)
+                uids = uids[:MAX_SENT_PER_POLL]
+                last = uids[-1] if uids else cursor.last_uid
+            return self._items(box, uids, uidvalidity, outgoing=True), Cursor(uidvalidity, last)
         finally:
             box.logout()
 
@@ -116,7 +168,7 @@ class Mailbox:
         finally:
             box.logout()
 
-    def _items(self, box: Any, uids: list[int], uidvalidity: int) -> list[Item]:
+    def _items(self, box: Any, uids: list[int], uidvalidity: int, outgoing: bool = False) -> list[Item]:
         now = datetime.now(UTC)
         items: list[Item] = []
         for uid in uids:
@@ -127,10 +179,11 @@ class Mailbox:
                 parsed = self.parser(raw)
             except MailParseError as error:
                 log.warning("mail %s could not be read: %s", uid, error)
-                items.append(Item(key=f"mail:{uidvalidity}:{uid}", kind="mail", title=UNREADABLE, posted_at=now, level=NORMAL))
+                if not outgoing:  # an unreadable mail of one's own adds nothing to a conversation
+                    items.append(Item(key=f"mail:{uidvalidity}:{uid}", kind="mail", title=UNREADABLE, posted_at=now, level=NORMAL))
                 continue
             self._keep_images(parsed)
-            items.append(mail_item(parsed, uid, uidvalidity, now))
+            items.append((sent_item if outgoing else mail_item)(parsed, uid, uidvalidity, now))
         return items
 
     @staticmethod

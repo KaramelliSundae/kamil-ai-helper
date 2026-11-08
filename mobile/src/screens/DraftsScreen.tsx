@@ -168,7 +168,7 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
         onCancel={() => setEditing(null)}
         onSave={(change) => {
           setEditing(null);
-          void act(() => api.updateDraft(item, change));
+          void act(() => api.updateDraft(connection, item, change));
         }}
       />
     ) : (
@@ -177,8 +177,8 @@ export function DraftsScreen({ connection }: { connection: Connection }) {
         busy={busy}
         sendLabel={canSend ? 'Gönder' : 'Mailde aç'}
         onSend={() => setConfirming(item)}
-        onOpenInApp={connection.mode === 'phone' && canSend ? () => void act(() => api.openDraftInMailApp(item)) : undefined}
-        onEdit={connection.mode === 'phone' ? () => setEditing(item.id) : undefined}
+        onOpenInApp={canSend ? () => void act(() => api.openDraftInMailApp(connection, item)) : undefined}
+        onEdit={() => setEditing(item.id)}
         onDiscard={() => void act(() => api.discardDraft(connection, item))}
       />
     ),

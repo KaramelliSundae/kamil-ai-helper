@@ -15,17 +15,19 @@ launcher, so this file stays thin: talk to the Firecracker API, proxy one vsock 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 
-from .vmguest import VSOCK_PORT
+from .vmguest import DIGEST_BYTES, INPUT_DAMAGED, VSOCK_PORT
 
 VCPU_COUNT = 1
 BOOT_ARGS = "console=ttyS0 reboot=k panic=1 pci=off"
@@ -38,6 +40,14 @@ FIRECRACKER_BIN = os.environ.get("FIRECRACKER_BIN", "/usr/bin/firecracker")
 class BootError(Exception):
     """The VM never came up or never finished the vsock handshake: nothing had seen the content yet,
     so it isn't the content's fault, and run_vm() boots a fresh VM and tries again."""
+
+
+DAMAGED_INPUT_REPLY = json.dumps(INPUT_DAMAGED, ensure_ascii=False).encode()
+
+
+class TransferError(BootError):
+    """The VM ran, but the bytes it got or sent back were damaged on the way (their SHA-256 didn't match).
+    That says nothing about the content, so like a failed boot it gets a fresh VM (see vmguest.DIGEST_BYTES)."""
 
 
 class GuestError(Exception):
@@ -105,7 +115,8 @@ def _recv_exact(connection: socket.socket, size: int) -> bytes:
     chunks: list[bytes] = []
     remaining = size
     while remaining:
-        chunk = connection.recv(min(remaining, 1 << 16))
+        # Large reads drain Firecracker's relay buffer quickly, which is when it was seen to damage data.
+        chunk = connection.recv(min(remaining, 1 << 20))
         if not chunk:
             raise GuestError("connection closed early")
         chunks.append(chunk)
@@ -160,12 +171,16 @@ def _vsock_exchange(uds_path: str, raw: bytes, max_reply_bytes: int, reply_timeo
     # From here on the guest has the content, so any failure is a GuestError, never a BootError.
     try:
         connection.settimeout(reply_timeout)
-        connection.sendall(struct.pack(">Q", len(raw)) + raw)
+        connection.sendall(struct.pack(">Q", len(raw)) + raw + hashlib.sha256(raw).digest())
         (size,) = struct.unpack(">Q", _recv_exact(connection, 8))
         if size > max_reply_bytes:
             raise GuestError(f"guest's reply is too large: {size} bytes")
         reply = _recv_exact(connection, size)
+        if hashlib.sha256(reply).digest() != _recv_exact(connection, DIGEST_BYTES):
+            raise TransferError("the reply was damaged on the way out of the VM")
         connection.sendall(b"\x01")  # ai_ders.vmguest waits for this before its own clean shutdown
+        if reply == DAMAGED_INPUT_REPLY:
+            raise TransferError("the content was damaged on the way into the VM")
         return reply
     except OSError as error:
         raise GuestError(f"vsock exchange broke: {error}") from error
@@ -223,7 +238,8 @@ def run_vm(
     raw: bytes, *, kernel_dir: str, rdinit: str, mem_size_mib: int, reply_timeout: float, max_reply_bytes: int
 ) -> bytes:
     """Boots one fresh microVM, hands it `raw` over vsock, and returns its JSON reply bytes. Raises
-    BootError if no VM came up after BOOT_ATTEMPTS tries, GuestError if one did and then failed on
+    BootError if no VM came up (or every transfer was damaged: TransferError) after BOOT_ATTEMPTS tries,
+    GuestError if one did and then failed on
     the content (never retried). `kernel_dir` holds vmlinux and initramfs.cpio.gz, built by
     deploy/linux/firecracker/build-image.sh: one shared image for every content type (it's the same
     venv either way), with a separate tiny /init-* entrypoint per type baked in at build time, picked
@@ -233,8 +249,10 @@ def run_vm(
     for attempt in range(1, BOOT_ATTEMPTS + 1):
         try:
             return _run_once(raw, kernel_dir, rdinit, mem_size_mib, reply_timeout, max_reply_bytes)
-        except BootError:
+        except BootError as error:  # TransferError too: a damaged transfer is retried like a failed boot
             if attempt == BOOT_ATTEMPTS:
                 raise
+            # In the unit's journal, so how often this happens stays visible.
+            print(f"vmhost: attempt {attempt}: {type(error).__name__}: {error}; trying a fresh VM", file=sys.stderr)
             time.sleep(0.5 * attempt)
     raise AssertionError("unreachable")

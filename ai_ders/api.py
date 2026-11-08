@@ -26,15 +26,23 @@ from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import PROVIDER_NAMES, GeminiClient, LlmBusy, LlmClient, clean_base_url, cloud_models, gemini_models
 from .suggest import clean_title, suggest_tasks
-from .notify import send_approved_draft
 from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS
+from .mailbox import OUTGOING_PREFIX
+from .mailsend import MailSender, MailSendError, OutgoingMail, recipients
+from .mailthread import plain_subject, reply_references, reply_subject
+from .models import NORMAL, Item
+from .reply import write_reply
 from .store import draft_hash, event_source, Store, to_time
-from .tools import MAIL_TOOLS, Tools
+from .tools import MAIL_TOOLS, Tools, is_school_address
 
 UPCOMING_DAYS = 14
 CONVERSATION_LIMIT = 100
 MESSAGE_LIMIT = 200
-PLACEHOLDER = re.compile(r"\[[^\]\n]{2,60}\]")  # for example [Adın Soyadın]
+# A blank the model left for the student, for example [Adın Soyadın]: the same rule and words as the phone.
+BLANK = re.compile(r"\[[^\]\n]{1,80}\]")
+BLANKS = "Köşeli parantezli yerleri doldurmadan gönderme."
+SENT_PREFIX = "mail:sent:"  # a mail sent from the app, until the Sent folder shows it too
+REPLY_THREAD = 20  # the newest mails of a conversation a reply is written from; the writer reads the last few
 GPU_MODES = ("assistant", "compute", "auto", "image")  # the last two: what apps not yet updated still send
 TASK_DUE = "gtask_due:"  # the day a task was added for, to notice when its item or exam moves
 GEMINI_FILE = "gemini.json"  # a key entered in the app, with the model and the mail choice
@@ -64,6 +72,22 @@ class TaskRequest(TaskKey):
 
 class SendRequest(BaseModel):
     hash: str
+
+
+class DraftChange(SendRequest):
+    """The student's own edit. `hash` is the draft as they last saw it, so a change elsewhere is not overwritten."""
+    to: str = Field(max_length=300)
+    subject: str = Field(max_length=300)
+    body: str = Field(max_length=20000)
+
+
+class ReplyKey(BaseModel):
+    key: str
+
+
+class ReplyRequest(ReplyKey):
+    to: str = Field(min_length=3, max_length=300)
+    body: str = Field(min_length=1, max_length=20000)
 
 
 class ModeRequest(BaseModel):
@@ -104,12 +128,26 @@ POLL_CHECK_SECONDS = 0.5
 POLL_COOLDOWN_SECONDS = 60  # pulling again and again must not hammer Canvas and the mail server
 
 
-def event_json(row: Any, item: Any = None) -> dict[str, Any]:
+def is_outgoing(key: str) -> bool:
+    return key.startswith((OUTGOING_PREFIX, SENT_PREFIX))
+
+
+def blank_warning(body: str) -> list[str]:
+    return [BLANKS] if BLANK.search(body) else []
+
+
+def event_json(row: Any, item: Any = None, school_domain: str = "") -> dict[str, Any]:
     """An event is what happened then; `current` is its item now, so the app can say what still holds."""
+    mail = item is not None and item["kind"] == "mail"
     return {
         "id": row["id"], "itemKey": row["item_key"], "type": row["type"], "level": row["level"],
         "title": row["title"], "body": row["body"], "url": row["url"], "createdAt": row["created_at"],
         "read": row["read_at"] is not None, "source": event_source(row["item_key"]),
+        # Mail: the conversation it belongs to, as the phone groups it (mobile/src/mailThread.ts).
+        "thread": (item["thread"] or None) if mail else None,
+        "outgoing": is_outgoing(row["item_key"]),
+        "hasFiles": bool(Store.attachments(item)) if mail else False,
+        "fromSchool": bool(mail and item["reply_to"] and is_school_address(item["reply_to"], school_domain)),
         "current": {
             "title": item["title"], "course": item["course"], "dueAt": item["due_at"],
             "submitted": bool(item["submitted"]), "grade": item["grade"], "postedAt": item["posted_at"],
@@ -136,10 +174,12 @@ def exam_task(exam: Any) -> tuple[str, str]:
 
 
 def draft_json(row: Any) -> dict[str, Any]:
+    warnings = [line for line in (row["warnings"] or "").split("\n") if line and line != BLANKS]
     return {
         "id": row["id"], "to": row["recipient"], "subject": row["subject"], "body": row["body"],
         "hash": draft_hash(row["recipient"], row["subject"], row["body"]), "createdAt": row["created_at"],
-        "warnings": [line for line in (row["warnings"] or "").split("\n") if line],
+        # Looked at again each time, so it holds for drafts the agent wrote and goes once the student fills them.
+        "warnings": warnings + blank_warning(f"{row['subject']}\n{row['body']}"),
     }
 
 
@@ -152,11 +192,12 @@ def create_app(
     gemini_lister: Any = None,
     cloud_lister: Any = None,
 ) -> FastAPI:
-    """`llm` is the local model, or None for a Gemini-only server. `gemini` and `gemini_lister` are for tests."""
+    """`llm` is the local model, or None for a Gemini-only server. `send` hands an approved mail to the sending
+    sandbox (mailsend.MailSender); tests pass their own. `gemini` and `gemini_lister` are for tests."""
     settings = settings or Settings.from_env()
     if llm is None and settings.local_llm_url:
         llm = LlmClient(settings.local_llm_url, settings.gpu_gate_url)
-    send = send or send_approved_draft
+    send = send or MailSender(settings.mail_sender)
     if tasks is None and settings.google_tasks:
         tasks = GoogleTasks(GoogleCredentials.parse(settings.google_tasks))
     injected_gemini = gemini
@@ -407,7 +448,10 @@ def create_app(
 
     @app.get("/v1/events", dependencies=guarded)
     def events(store: Db, limit: int = 120) -> list[dict[str, Any]]:
-        return [event_json(row, store.get_item(row["item_key"])) for row in store.recent_events(min(limit, 200))]
+        return [
+            event_json(row, store.get_item(row["item_key"]), settings.school_domain)
+            for row in store.recent_events(min(limit, 200))
+        ]
 
     @app.post("/v1/events/refresh", dependencies=guarded)
     def refresh_events(store: Db) -> dict[str, bool]:
@@ -453,6 +497,8 @@ def create_app(
             "sender": row["sender"], "body": row["body"], "url": row["url"],
             "postedAt": row["posted_at"], "dueAt": row["due_at"], "grade": row["grade"],
             "submitted": bool(row["submitted"]),
+            # Mail: where a reply goes. The sender's own address, never a Reply-To the mail asked for.
+            "replyTo": (row["reply_to"] or None) if row["kind"] == "mail" else None,
             "inTasks": store.get_meta(f"gtask:{row['key']}") is not None,
             # Images come only as the sandbox re-encoded them; other files are listed, never served.
             "attachments": [
@@ -645,27 +691,139 @@ def create_app(
     def drafts(store: Db) -> list[dict[str, Any]]:
         return [draft_json(row) for row in store.pending_drafts()]
 
-    @app.post("/v1/drafts/{draft_id}/send", dependencies=guarded)
-    def send_draft(draft_id: str, request: SendRequest, store: Db) -> dict[str, str]:
+    def can_send() -> bool:
+        available = getattr(send, "available", None)
+        return bool(settings.smtp_host) and (available() if callable(available) else True)
+
+    def first_name() -> str | None:
+        first = (settings.student_name or "").split()
+        return first[0].capitalize() if first else None
+
+    def approved(store: Store, draft_id: str, seen: str) -> Any:
+        """The draft exactly as the student saw it, still waiting; anything else is refused."""
         row = store.get_draft(draft_id)
         if row is None:
             raise HTTPException(404, "taslak bulunamadı")
-        recipient, subject, body = row["recipient"], row["subject"], row["body"]
-        if not hmac.compare_digest(request.hash, draft_hash(recipient, subject, body)):
+        if not hmac.compare_digest(seen, draft_hash(row["recipient"], row["subject"], row["body"])):
             raise HTTPException(409, "taslak onayladığın halinden farklı")
-        if PLACEHOLDER.search(f"{subject}\n{body}"):
-            raise HTTPException(422, "taslakta doldurulmamış bir alan var, sil ve yeniden iste")
+        if row["status"] != "pending":
+            raise HTTPException(409, "taslak zaten işlendi")
+        return row
+
+    def deliver(store: Store, row: Any) -> dict[str, Any]:
+        """Sends a draft this request has claimed. On failure it waits again in Onaylar, so nothing is lost."""
+        draft_id = row["id"]
+        try:
+            to = recipients(row["recipient"])
+            result = send(OutgoingMail(
+                to, row["subject"], row["body"], row["in_reply_to"], reply_references(row["refs"], row["in_reply_to"]),
+            ))
+        except MailSendError as error:
+            store.set_draft_status(draft_id, "pending")
+            raise HTTPException(502, str(error)) from error
+        except Exception as error:  # noqa: BLE001 - the draft goes back so nothing is lost
+            store.set_draft_status(draft_id, "pending")
+            raise HTTPException(502, "Mail gönderilemedi.") from error
+        store.set_draft_status(draft_id, "sent")
+        # It shows in its conversation at once; when the Sent folder is read, its Message-ID keeps it from showing twice.
+        now = datetime.now(UTC)
+        key = f"{SENT_PREFIX}{draft_id}"
+        store.upsert(Item(
+            key=key, kind="mail", title=row["subject"], sender="Sen", body=row["body"], posted_at=now, level=NORMAL,
+            thread=row["thread"] or f"s:{plain_subject(row['subject'])}", reply_to=to[0],
+            message_id=result.message_id, references=row["refs"],
+        ), now)
+        store.add_quiet_event(key, f"Mail: {row['subject']}", f"Kime: {row['recipient']}", now)
+        return {"status": "sent", "sentCopy": result.sent_copy}
+
+    def mail_row(store: Store, key: str) -> Any:
+        row = store.get_item(key)
+        if row is None or row["kind"] != "mail":
+            raise HTTPException(404, "Mail bulunamadı")
+        return row
+
+    @app.post("/v1/drafts/{draft_id}/send", dependencies=guarded)
+    def send_draft(draft_id: str, request: SendRequest, store: Db) -> dict[str, Any]:
+        """Only from the student's tap in Onaylar, and only what they saw."""
+        approved(store, draft_id, request.hash)
         if not store.claim_draft(draft_id, "sending"):
             raise HTTPException(409, "taslak zaten işlendi")
+        return deliver(store, store.get_draft(draft_id))
+
+    @app.put("/v1/drafts/{draft_id}", dependencies=guarded)
+    def update_draft(draft_id: str, request: DraftChange, store: Db) -> dict[str, Any]:
+        """The student's own edit. What was warned about the text is looked at again; what was warned about
+        where it came from stays."""
+        row = approved(store, draft_id, request.hash)
+        kept = tuple(line for line in (row["warnings"] or "").split("\n") if line and line != BLANKS)
+        subject = re.sub(r"[\r\n]+", " ", request.subject).strip()[:300]
+        if not store.update_draft(draft_id, request.to.strip()[:300], subject, request.body[:20000], kept):
+            raise HTTPException(409, "taslak zaten işlendi")
+        return draft_json(store.get_draft(draft_id))
+
+    @app.post("/v1/drafts/{draft_id}/opened", dependencies=guarded)
+    def opened_draft(draft_id: str, request: SendRequest, store: Db) -> dict[str, str]:
+        """The app opened it in the phone's mail app: from there the student sends it, so it leaves Onaylar."""
+        approved(store, draft_id, request.hash)
+        if not store.claim_draft(draft_id, "opened"):
+            raise HTTPException(409, "taslak zaten işlendi")
+        return {"status": "opened"}
+
+    @app.get("/v1/mail/can-send", dependencies=guarded)
+    def mail_can_send() -> dict[str, bool]:
+        """Whether Onaylar can send by itself. Without it, drafts open in the phone's mail app."""
+        return {"canSend": can_send()}
+
+    @app.post("/v1/mail/reply-text", dependencies=guarded)
+    def reply_text(request: ReplyKey, store: Db) -> dict[str, str]:
+        """Text for a reply, from the whole conversation, when the student taps for it. It only fills the box:
+        nothing is saved or sent. The local model writes it; a cloud model only if mail may go there."""
+        row = mail_row(store, request.key)
+        thread = store.thread_mail(row["thread"], REPLY_THREAD) if row["thread"] else []
+        mails = [{"sender": r["sender"], "title": r["title"], "body": r["body"]} for r in thread or [row]]
+        cloud = current_gemini() if mail_to_gemini() else None
+        if llm is None and cloud is None:
+            if current_gemini() is None:
+                raise HTTPException(409, "Model bağlı değil, yanıtı kendin yazabilirsin.")
+            raise HTTPException(409, "Mailler bulut modele kapalı. Ayarlar'dan açabilir veya yanıtı kendin yazabilirsin.")
         try:
-            send(settings, recipient, subject, body)
-        except Exception as error:  # noqa: BLE001 - the draft goes back so nothing is lost
-            store.db.execute("UPDATE drafts SET status = 'pending' WHERE id = ?", (draft_id,))
-            store.db.commit()
-            raise HTTPException(502, "mail gönderilemedi") from error
-        store.db.execute("UPDATE drafts SET status = 'sent' WHERE id = ?", (draft_id,))
-        store.db.commit()
-        return {"status": "sent"}
+            try:
+                body = write_reply(llm or cloud, mails, first_name())
+            except LlmBusy:
+                if llm is None or cloud is None:
+                    raise
+                body = write_reply(cloud, mails, first_name())  # the GPU is lent out, and mail may go to the cloud
+        except LlmBusy as busy:
+            raise HTTPException(503, str(busy)) from busy
+        if not body:
+            raise HTTPException(503, "Model boş yanıt verdi, tekrar dene.")
+        return {"body": body}
+
+    def save_reply(store: Store, request: ReplyRequest) -> Any:
+        row = mail_row(store, request.key)
+        draft_id = store.create_draft(
+            request.to.strip()[:300], reply_subject(row["title"])[:300], request.body[:20000], datetime.now(UTC),
+            tuple(blank_warning(request.body)), thread=row["thread"], in_reply_to=row["message_id"], refs=row["refs"],
+        )
+        return store.get_draft(draft_id)
+
+    @app.post("/v1/mail/reply", dependencies=guarded)
+    def reply(request: ReplyRequest, store: Db) -> dict[str, Any]:
+        """A reply as the student wrote it, waiting in Onaylar."""
+        return draft_json(save_reply(store, request))
+
+    @app.post("/v1/mail/reply/send", dependencies=guarded)
+    def reply_send(request: ReplyRequest, store: Db) -> dict[str, Any]:
+        """Sent straight from the box, after the student confirmed. If it fails nothing stays behind: the text is
+        still in the box."""
+        row = save_reply(store, request)
+        if not store.claim_draft(row["id"], "sending"):
+            raise HTTPException(409, "taslak zaten işlendi")
+        try:
+            return deliver(store, row)
+        except HTTPException:
+            store.set_draft_status(row["id"], "discarded")
+            raise
 
     @app.post("/v1/drafts/{draft_id}/discard", dependencies=guarded)
     def discard_draft(draft_id: str, store: Db) -> dict[str, str]:

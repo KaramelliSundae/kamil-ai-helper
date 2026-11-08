@@ -101,6 +101,28 @@ def ingest(store: Store, settings: Settings, items: list[Item], now: datetime, b
     return count
 
 
+def keep_sent(store: Store, mailbox: Mailbox, now: datetime) -> None:
+    """The student's own mails join their conversations, read and silent, as on the phone. Only the other
+    half of each conversation, so a failure here is logged and never counts against the mail source."""
+    raw = store.get_meta("sent_cursor")
+    cursor = Cursor(*map(int, raw.split(":"))) if raw else None
+    try:
+        found = mailbox.fetch_sent(cursor, now - timedelta(days=MAIL_HISTORY_DAYS))
+    except Exception:  # noqa: BLE001 - imaplib raises many unrelated types
+        log.warning("Sent folder not read", exc_info=True)
+        return
+    if found is None:
+        return
+    items, new_cursor = found
+    for item in items:
+        # One Kamil sent itself is recorded already, under its own key, by the API that sent it.
+        if store.has_message_id(item.message_id) or store.get_item(item.key) is not None:
+            continue
+        store.upsert(item, now)
+        store.add_quiet_event(item.key, f"Mail: {item.title}", f"Kime: {item.reply_to}", item.posted_at or now)
+    store.set_meta("sent_cursor", f"{new_cursor.uidvalidity}:{new_cursor.last_uid}")
+
+
 def poll_canvas(canvas: CanvasClient, now: datetime) -> list[Item]:
     courses = canvas.courses()
     items: list[Item] = []
@@ -261,6 +283,7 @@ def run_poll(
             result.items += len(items)
             store.set_meta("mail_cursor", f"{new_cursor.uidvalidity}:{new_cursor.last_uid}")
             clear_failure(store, "Mail")
+            keep_sent(store, mailbox, now)
 
     result.events += add_reminders(store, settings, now)
     result.events += fire_user_reminders(store, now)

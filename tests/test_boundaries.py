@@ -14,7 +14,7 @@ NETWORK = re.compile(r"^\s*(?:import|from)\s+(?:httpx|requests|urllib\.request|h
 # Modules that handle untrusted text. None of them may open a network connection of their own.
 CONTENT_MODULES = [
     "text", "mailparse", "docparse", "fcguest", "dpguest", "vmguest",
-    "rules", "tools", "agent", "watcher", "store", "models",
+    "rules", "tools", "agent", "watcher", "store", "models", "reply", "mailthread",
 ]
 
 
@@ -45,3 +45,18 @@ def test_the_only_sockets_the_firecracker_host_opens_are_local():
 def test_no_tool_can_reach_the_web_or_a_shell():
     source = (SOURCE / "tools.py").read_text()
     assert not re.search(r"\b(?:subprocess|os\.system|os\.popen|eval|exec)\b", source)
+
+
+def test_only_the_sending_sandbox_speaks_smtp():
+    """Mail leaves this machine from ai_ders.mailsend alone (the digest borrows its open_smtp)."""
+    speaking = {path.stem for path in SOURCE.glob("*.py") if re.search(r"^\s*import smtplib\b", path.read_text(), re.M)}
+    assert speaking == {"mailsend"}
+
+
+def test_the_api_never_holds_the_mail_password():
+    assert "mail_password" not in (SOURCE / "api.py").read_text()
+    unit = (SOURCE.parent / "deploy" / "linux" / "ai-ders-api.service").read_text()
+    assert not re.search(r"^LoadCredential\w*=mail_password", unit, re.M)
+    sender = (SOURCE.parent / "deploy" / "linux" / "ai-ders-mailsend@.service").read_text()
+    assert re.search(r"^LoadCredentialEncrypted=mail_password", sender, re.M)
+    assert re.search(r"^InaccessiblePaths=.*/var/lib/ai-ders\b", sender, re.M)  # the database stays out of reach

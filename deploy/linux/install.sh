@@ -89,6 +89,11 @@ else
 fi
 grep -q '^KEEP_AWAKE=yes' /etc/ai-ders/env && systemctl enable --now ai-ders-keepawake.service
 
+# Approved mail is sent from its own sandbox, the only place the API's requests meet the mail password.
+# The socket listens only once that password is set (see its ConditionPathExists).
+systemctl enable ai-ders-mailsend.socket
+systemctl restart ai-ders-mailsend.socket
+
 if [[ -f /etc/ai-ders/creds/api_token.cred ]]; then
   systemctl enable ai-ders-api.service
   systemctl restart ai-ders-api.service

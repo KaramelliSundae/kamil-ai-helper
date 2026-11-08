@@ -63,13 +63,18 @@ async function approved(draft: Draft) {
   return stored;
 }
 
-async function openInMailApp(draft: Draft): Promise<{ status: string }> {
+/** Opens a draft in the phone's mail app. Also used in server mode, where the server only learns it was opened. */
+export async function openMailto(draft: Draft): Promise<void> {
   // canOpenURL needs a manifest <queries> entry on Android 11+, so the open itself is the test.
   try {
     await Linking.openURL(mailto(draft));
   } catch {
     throw new ApiError('Telefonda mail uygulaması bulunamadı', 409);
   }
+}
+
+async function openInMailApp(draft: Draft): Promise<{ status: string }> {
+  await openMailto(draft);
   await updateState((saved) => {
     const row = saved.drafts.find((d) => d.id === draft.id);
     if (row) row.status = 'opened';

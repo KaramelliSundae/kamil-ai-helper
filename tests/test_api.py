@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from ai_ders.api import create_app
 from ai_ders.llm import LlmBusy
+from ai_ders.mailsend import MailSendError, SendResult
 from ai_ders.models import Item
 from ai_ders.store import Store, draft_hash
 
@@ -18,14 +19,24 @@ AUTH = {"Authorization": "Bearer dogru"}
 
 
 class Sends:
-    def __init__(self, fail=False):
-        self.fail = fail
-        self.calls = []
+    """Stands in for the sending sandbox (mailsend.MailSender)."""
 
-    def __call__(self, settings, recipient, subject, body):
+    def __init__(self, fail=False, running=True, sent_copy=True):
+        self.fail = fail
+        self.running = running
+        self.sent_copy = sent_copy
+        self.calls = []
+        self.mails = []
+
+    def available(self):
+        return self.running
+
+    def __call__(self, mail):
         if self.fail:
-            raise OSError("smtp down")
-        self.calls.append((recipient, subject, body))
+            raise MailSendError("Mail sunucusu alıcıyı veya maili kabul etmedi")
+        self.calls.append((", ".join(mail.to), mail.subject, mail.body))
+        self.mails.append(mail)
+        return SendResult(f"<id{len(self.calls)}@uni.example.edu>", self.sent_copy)
 
 
 class Llm:
@@ -63,6 +74,8 @@ ROUTES = [
     ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"), ("get", "/v1/settings/cloud/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
     ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"),
+    ("put", "/v1/drafts/x"), ("post", "/v1/drafts/x/opened"), ("get", "/v1/mail/can-send"),
+    ("post", "/v1/mail/reply-text"), ("post", "/v1/mail/reply"), ("post", "/v1/mail/reply/send"),
 ]
 
 
@@ -156,26 +169,36 @@ def test_changed_draft_is_not_sent(client, db, sends):
     ("subject", "body"),
     [("Mazeret - [Adın Soyadın]", "Merhaba"), ("Mazeret", "Saygılarımla,\n[Öğrenci No]")],
 )
-def test_draft_with_an_unfilled_field_is_not_sent(client, db, sends, subject, body):
-    draft_id = db.create_draft("hoca@uni.example.edu", subject, body, NOW)
-    approved = draft_hash("hoca@uni.example.edu", subject, body)
-    assert client.post(f"/v1/drafts/{draft_id}/send", json={"hash": approved}, headers=AUTH).status_code == 422
-    assert sends.calls == []
-    assert len(db.pending_drafts()) == 1
+def test_draft_with_an_unfilled_field_warns_as_on_the_phone(client, db, sends, subject, body):
+    """The student can fill it now (PUT /v1/drafts), so like the phone it warns instead of refusing."""
+    db.create_draft("hoca@uni.example.edu", subject, body, NOW, ("Okul dışı adres: x@y.z",))
+    draft = client.get("/v1/drafts", headers=AUTH).json()[0]
+    assert draft["warnings"] == ["Okul dışı adres: x@y.z", "Köşeli parantezli yerleri doldurmadan gönderme."]
+    filled = {"hash": draft["hash"], "to": draft["to"], "subject": "Mazeret", "body": "Saygılarımla,\nAyşe"}
+    edited = client.put(f"/v1/drafts/{draft['id']}", json=filled, headers=AUTH).json()
+    assert edited["warnings"] == ["Okul dışı adres: x@y.z"]  # where it came from still holds
 
 
 def test_failed_send_keeps_the_draft(api_settings, db):
     client = TestClient(create_app(api_settings, Llm(), Sends(fail=True)))
-    draft_id = db.create_draft("a@b.c", "K", "M", NOW)
-    response = client.post(f"/v1/drafts/{draft_id}/send", json={"hash": draft_hash("a@b.c", "K", "M")}, headers=AUTH)
-    assert response.status_code == 502
+    draft_id = db.create_draft("a@b.example", "K", "M", NOW)
+    response = client.post(f"/v1/drafts/{draft_id}/send", json={"hash": draft_hash("a@b.example", "K", "M")}, headers=AUTH)
+    assert response.status_code == 502 and response.json()["detail"] == "Mail sunucusu alıcıyı veya maili kabul etmedi"
     assert len(client.get("/v1/drafts", headers=AUTH).json()) == 1
 
 
+def test_a_recipient_list_with_anything_odd_is_not_sent(client, db, sends):
+    draft_id = db.create_draft("hoca@uni.example.edu\r\nBcc: x@y.z", "K", "M", NOW)
+    hashed = draft_hash("hoca@uni.example.edu\r\nBcc: x@y.z", "K", "M")
+    response = client.post(f"/v1/drafts/{draft_id}/send", json={"hash": hashed}, headers=AUTH)
+    assert response.status_code == 502 and sends.calls == []
+    assert len(db.pending_drafts()) == 1
+
+
 def test_discarded_draft_cannot_be_sent(client, db, sends):
-    draft_id = db.create_draft("a@b.c", "K", "M", NOW)
+    draft_id = db.create_draft("a@b.example", "K", "M", NOW)
     assert client.post(f"/v1/drafts/{draft_id}/discard", headers=AUTH).status_code == 200
-    sent = client.post(f"/v1/drafts/{draft_id}/send", json={"hash": draft_hash("a@b.c", "K", "M")}, headers=AUTH)
+    sent = client.post(f"/v1/drafts/{draft_id}/send", json={"hash": draft_hash("a@b.example", "K", "M")}, headers=AUTH)
     assert sent.status_code == 409 and sends.calls == []
 
 

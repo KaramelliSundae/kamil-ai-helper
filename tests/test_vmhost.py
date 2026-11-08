@@ -19,7 +19,13 @@ import threading
 import pytest
 
 from ai_ders import vmhost
-from ai_ders.vmhost import BootError, GuestError, _Api, _handshake, _vsock_exchange
+import hashlib
+
+from ai_ders.vmhost import BootError, GuestError, TransferError, _Api, _handshake, _vsock_exchange
+
+
+def digest(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
 
 
 @pytest.fixture
@@ -105,8 +111,9 @@ def test_vsock_exchange_is_length_prefixed_both_ways(sock_path):
         (size,) = struct.unpack(">Q", connection.recv(8))
         mail = connection.recv(size)
         assert mail == b"raw mail bytes"
+        assert connection.recv(32) == digest(mail)
         reply = b'{"subject": "hi"}'
-        connection.sendall(struct.pack(">Q", len(reply)) + reply)
+        connection.sendall(struct.pack(">Q", len(reply)) + reply + digest(reply))
         ack = connection.recv(1)
         assert ack == b"\x01"
 
@@ -128,8 +135,8 @@ def test_vsock_exchange_retries_the_handshake_until_the_guest_is_listening(sock_
         connection.recv(256)
         connection.sendall(b"OK 1\n")
         (size,) = struct.unpack(">Q", connection.recv(8))
-        connection.recv(size)
-        connection.sendall(struct.pack(">Q", 2) + b"{}")
+        connection.recv(size + 32)
+        connection.sendall(struct.pack(">Q", 2) + b"{}" + digest(b"{}"))
         connection.recv(1)
 
     # One listening socket, two sequential accept()s: simpler than juggling bind/rebind across a
@@ -166,6 +173,45 @@ def test_a_guest_that_dies_after_taking_the_content_is_a_guest_error(sock_path):
     with pytest.raises(GuestError):
         _vsock_exchange(sock_path, b"raw", max_reply_bytes=1000, reply_timeout=5)
     thread.join(5)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        # The reply as sent, then damaged in the relay: a 32 KiB block repeated, as was seen on the server.
+        lambda reply: struct.pack(">Q", len(reply)) + reply[:4] + reply[:4] + reply[8:] + digest(reply),
+        # The guest says what it got was not what was sent.
+        lambda reply: struct.pack(">Q", 28) + b'{"error": "TransferDamaged"}' + digest(b'{"error": "TransferDamaged"}'),
+    ],
+)
+def test_a_damaged_transfer_is_a_transfer_error_not_a_guest_error(sock_path, answer):
+    def handle(connection):
+        connection.recv(256)
+        connection.sendall(b"OK 1\n")
+        (size,) = struct.unpack(">Q", connection.recv(8))
+        connection.recv(size + 32)
+        connection.sendall(answer(b'{"subject": "hi"}'))
+        connection.recv(1)
+
+    thread = fake_server(sock_path, handle)
+    with pytest.raises(TransferError):
+        _vsock_exchange(sock_path, b"raw", max_reply_bytes=1000, reply_timeout=5)
+    thread.join(5)
+
+
+def test_run_vm_retries_a_damaged_transfer(monkeypatch):
+    calls = []
+
+    def damaged_once(*args):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TransferError("damaged")
+        return b"{}"
+
+    monkeypatch.setattr(vmhost, "_run_once", damaged_once)
+    monkeypatch.setattr(vmhost.time, "sleep", lambda _: None)
+    assert vmhost.run_vm(b"x", kernel_dir="", rdinit="", mem_size_mib=1, reply_timeout=1, max_reply_bytes=1) == b"{}"
+    assert len(calls) == 2
 
 
 def test_run_vm_retries_a_vm_that_never_booted(monkeypatch):

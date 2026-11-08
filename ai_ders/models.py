@@ -42,3 +42,8 @@ class Item:
     submitted: bool = False
     level: str = HIGH
     attachments: tuple[Attachment, ...] = ()
+    # Mail only: the conversation it belongs to, where a reply goes, and the ids a reply must name.
+    thread: str = ""
+    reply_to: str = ""
+    message_id: str = ""
+    references: str = ""

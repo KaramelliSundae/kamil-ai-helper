@@ -1,0 +1,22 @@
+# Where the API hands over a mail the student approved. The API holds no mail password: only the service
+# behind this socket (ai-ders-mailsend@.service) does, and it sends nothing but one checked, plain-text mail
+# from the student's own address per connection.
+[Unit]
+Description=AI Ders mail sender socket
+
+# Without the password every connection would fail after the API had already asked; not listening at all
+# makes the app see that sending is off here and offer the phone's mail app instead.
+ConditionPathExists=/etc/ai-ders/creds/mail_password.cred
+
+[Socket]
+ListenStream=/run/ai-ders-mailsend.sock
+# Only the ai-ders user (the API) may hand it a mail.
+SocketUser=ai-ders
+SocketGroup=ai-ders
+SocketMode=0600
+Accept=yes
+# The student taps one send at a time; more at once is not them.
+MaxConnections=2
+
+[Install]
+WantedBy=sockets.target

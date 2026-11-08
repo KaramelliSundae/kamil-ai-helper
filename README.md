@@ -191,7 +191,7 @@ Set in `/etc/ai-ders/env` on the server; `deploy/env.example` has comments for e
 | `IMAP_HOST`, `IMAP_PORT` | School mail server; leave `IMAP_HOST` empty to run without mail |
 | `MAIL_USER` | Your school mail address |
 | `STUDENT_NAME` | Signs drafts and greets you |
-| `SMTP_HOST`, `SMTP_PORT` | Sends approved drafts and the optional digest |
+| `SMTP_HOST`, `SMTP_PORT` | Sends approved drafts and replies (from their own sandbox) and the optional digest; port 465 (default) is TLS from the start, 587 must offer STARTTLS |
 | `NOTIFY_EMAIL` | Optional daily digest by mail |
 | `WEBMAIL_URL` | Optional, for the app's "open in webmail" button |
 | `SCHOOL_DOMAIN` | Addresses under it count as your school's (default: the domain of `MAIL_USER`) |

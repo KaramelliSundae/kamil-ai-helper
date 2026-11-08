@@ -175,7 +175,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
         </Column>
 
         {/* Up here as well: a long conversation would otherwise push it far down. */}
-        {mail && detail?.replyTo && connection.mode === 'phone' && !replying ? (
+        {mail && detail?.replyTo && !replying ? (
           <Button onClick={() => { setNote(null); setReplying(true); }}>
             <Icon source={icons.mail} size={18} />
             <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>

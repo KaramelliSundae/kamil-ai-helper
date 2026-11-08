@@ -181,6 +181,12 @@ class Store:
         self._add_column("memories", "untrusted", "INTEGER NOT NULL DEFAULT 0")
         self._add_column("drafts", "warnings", "TEXT NOT NULL DEFAULT ''")
         self._add_column("exam_courses", "attendance", "TEXT NOT NULL DEFAULT '[]'")
+        # Mail conversations and replies. "refs", since REFERENCES is an SQL keyword.
+        for column in ("thread", "reply_to", "message_id", "refs"):
+            self._add_column("items", column, "TEXT NOT NULL DEFAULT ''")
+        for column in ("thread", "in_reply_to", "refs"):
+            self._add_column("drafts", column, "TEXT NOT NULL DEFAULT ''")
+        self.db.execute("CREATE INDEX IF NOT EXISTS items_message_id ON items (message_id) WHERE message_id != ''")
         self.db.execute("CREATE INDEX IF NOT EXISTS chat_conversation ON chat (conversation_id)")
         self.db.commit()
         self._never_reuse_event_ids()
@@ -266,10 +272,12 @@ class Store:
         if row is None:
             self.db.execute(
                 "INSERT INTO items (key, kind, title, course, url, sender, body, due_at, posted_at, grade, "
-                "submitted, first_seen, last_seen, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "submitted, first_seen, last_seen, attachments, thread, reply_to, message_id, refs) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     item.key, item.kind, item.title, item.course, item.url, item.sender, item.body,
                     due, posted, item.grade, int(item.submitted), stamp, stamp, files,
+                    item.thread, item.reply_to, item.message_id, item.references,
                 ),
             )
             self.db.commit()
@@ -284,14 +292,40 @@ class Store:
             changes.append(Change("updated"))
         self.db.execute(
             "UPDATE items SET kind = ?, title = ?, course = ?, url = ?, sender = ?, body = ?, due_at = ?, "
-            "posted_at = ?, grade = ?, submitted = ?, last_seen = ?, attachments = ? WHERE key = ?",
+            "posted_at = ?, grade = ?, submitted = ?, last_seen = ?, attachments = ?, "
+            "thread = ?, reply_to = ?, message_id = ?, refs = ? WHERE key = ?",
             (
                 item.kind, item.title, item.course, item.url, item.sender, item.body, due, posted,
-                item.grade, int(item.submitted), stamp, files, item.key,
+                item.grade, int(item.submitted), stamp, files,
+                item.thread, item.reply_to, item.message_id, item.references, item.key,
             ),
         )
         self.db.commit()
         return changes
+
+    def add_quiet_event(self, item_key: str, title: str, body: str, at: datetime) -> None:
+        """An event born read and already "sent": shown in its conversation, never notified, never in a digest.
+        For the student's own mail, which needs no telling about."""
+        stamp = to_text(at)
+        self.db.execute(
+            "INSERT INTO events (item_key, type, level, title, body, url, created_at, sent_at, read_at) "
+            "VALUES (?, 'new', 'normal', ?, ?, '', ?, ?, ?)",
+            (item_key, title, body, stamp, stamp, stamp),
+        )
+        self.db.commit()
+
+    def thread_mail(self, thread: str, limit: int) -> list[sqlite3.Row]:
+        """The newest mails of one conversation, both sides, oldest first."""
+        rows = self.db.execute(
+            "SELECT * FROM items WHERE kind = 'mail' AND thread = ? AND thread != '' ORDER BY posted_at DESC LIMIT ?",
+            (thread, limit),
+        ).fetchall()
+        return rows[::-1]
+
+    def has_message_id(self, message_id: str) -> bool:
+        return bool(message_id) and self.db.execute(
+            "SELECT 1 FROM items WHERE message_id = ?", (message_id,)
+        ).fetchone() is not None
 
     def add_event(self, item_key: str, type: str, level: str, title: str, body: str, url: str, now: datetime) -> None:
         self.db.execute(
@@ -501,16 +535,30 @@ class Store:
         self.db.commit()
 
     def create_draft(
-        self, recipient: str, subject: str, body: str, now: datetime, warnings: tuple[str, ...] = ()
+        self, recipient: str, subject: str, body: str, now: datetime, warnings: tuple[str, ...] = (),
+        thread: str = "", in_reply_to: str = "", refs: str = "",
     ) -> str:
         draft_id = uuid.uuid4().hex
         self.db.execute(
-            "INSERT INTO drafts (id, recipient, subject, body, status, created_at, warnings) "
-            "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-            (draft_id, recipient, subject, body, to_text(now), "\n".join(warnings)),
+            "INSERT INTO drafts (id, recipient, subject, body, status, created_at, warnings, thread, in_reply_to, refs) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+            (draft_id, recipient, subject, body, to_text(now), "\n".join(warnings), thread, in_reply_to, refs),
         )
         self.db.commit()
         return draft_id
+
+    def update_draft(self, draft_id: str, recipient: str, subject: str, body: str, warnings: tuple[str, ...]) -> bool:
+        """The student's own edit. Only a pending draft changes, so an edit can't race a send."""
+        cursor = self.db.execute(
+            "UPDATE drafts SET recipient = ?, subject = ?, body = ?, warnings = ? WHERE id = ? AND status = 'pending'",
+            (recipient, subject, body, "\n".join(warnings), draft_id),
+        )
+        self.db.commit()
+        return cursor.rowcount == 1
+
+    def set_draft_status(self, draft_id: str, status: str) -> None:
+        self.db.execute("UPDATE drafts SET status = ? WHERE id = ?", (status, draft_id))
+        self.db.commit()
 
     def pending_drafts(self) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM drafts WHERE status = 'pending' ORDER BY created_at").fetchall()

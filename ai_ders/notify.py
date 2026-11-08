@@ -1,19 +1,18 @@
 """Delivering events to the student.
 
 The recipient of a notification comes only from settings, never from a caller, so no content can steer
-one to somebody else. The one exception is send_approved_draft(), reached only through the app's approval.
+one to somebody else. Mail the student approved to send goes another way: ai_ders.mailsend, its own sandbox.
 """
 
 from __future__ import annotations
 
 import logging
-import smtplib
-import ssl
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from typing import Protocol
 
 from .config import Settings
+from .mailsend import open_smtp
 from .models import CRITICAL, HIGH, LOW, NORMAL
 from .store import Event, Store, to_time
 from .text import shorten
@@ -41,22 +40,9 @@ class SmtpNotifier:
         message["To"] = settings.notify_email
         message["Subject"] = subject
         message.set_content(body)
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-            smtp.starttls(context=ssl.create_default_context())
+        with open_smtp(settings.smtp_host, settings.smtp_port) as smtp:
             smtp.login(settings.mail_user, settings.mail_password)
             smtp.send_message(message)
-
-
-def send_approved_draft(settings: Settings, recipient: str, subject: str, body: str) -> None:
-    message = EmailMessage()
-    message["From"] = settings.mail_user
-    message["To"] = recipient
-    message["Subject"] = subject
-    message.set_content(body)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-        smtp.starttls(context=ssl.create_default_context())
-        smtp.login(settings.mail_user, settings.mail_password)
-        smtp.send_message(message)
 
 
 class ConsoleNotifier:

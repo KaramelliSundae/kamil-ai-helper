@@ -39,9 +39,11 @@ IMAGE_SIDE = 1600
 JPEG_QUALITY = 82
 IMAGE_FORMATS = ["JPEG", "PNG", "GIF", "WEBP"]
 IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/gif", "image/webp"}
-# The rules only look at these; the rest of the header block never leaves the sandbox.
-KEPT_HEADERS = ("precedence", "list-id", "list-unsubscribe", "auto-submitted")
-TEXT_LIMITS = {"subject": 1000, "sender": 500, "from": 500, "body": 200_000, "name": 200, "type": 100}
+# The rules look at the first four, conversations and replies at the last three; the rest of the header
+# block never leaves the sandbox.
+KEPT_HEADERS = ("precedence", "list-id", "list-unsubscribe", "auto-submitted", "message-id", "in-reply-to", "references")
+HEADER_LIMITS = {"references": 4000}  # a long conversation's chain of message ids; every other header 500
+TEXT_LIMITS = {"subject": 1000, "sender": 500, "from": 500, "to": 500, "body": 200_000, "name": 200, "type": 100}
 
 
 class MailParseError(Exception):
@@ -62,6 +64,7 @@ class ParsedMail:
     headers: dict[str, str] = field(default_factory=dict)
     attachments: tuple[Attachment, ...] = ()
     images: dict[str, bytes] = field(default_factory=dict)  # sha256 → clean JPEG
+    to: str = ""  # the first recipient's bare address: who a mail from the Sent folder went to
 
 
 # ---- inside the sandbox ----------------------------------------------------------------------------
@@ -121,6 +124,7 @@ def parse(raw: bytes) -> dict[str, Any]:
         "subject": message.subject or "",
         "sender": message.from_values.full if message.from_values else message.from_,
         "from": message.from_ or "",
+        "to": message.to[0] if message.to else "",
         "date": date.isoformat() if date else None,
         "headers": {name: headers[name] for name in KEPT_HEADERS if name in headers},
         "body": body,
@@ -203,7 +207,7 @@ def from_reply(reply: Any) -> ParsedMail:
     headers_in = reply.get("headers") or {}
     if not isinstance(headers_in, dict):
         raise MailParseError("headers is not an object")
-    headers = {k: str(v)[:500] for k, v in headers_in.items() if k in KEPT_HEADERS}
+    headers = {k: str(v)[: HEADER_LIMITS.get(k, 500)] for k, v in headers_in.items() if k in KEPT_HEADERS}
 
     attachments: list[Attachment] = []
     images: dict[str, bytes] = {}
@@ -234,6 +238,7 @@ def from_reply(reply: Any) -> ParsedMail:
         subject=_text(reply, "subject"),
         sender=_text(reply, "sender"),
         from_=_text(reply, "from"),
+        to=_text(reply, "to"),
         date=date,
         body=_text(reply, "body"),
         headers=headers,

@@ -18,6 +18,7 @@ Firecracker with seccomp rather than relying on the VM boundary alone.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import resource
@@ -27,6 +28,16 @@ import struct
 from collections.abc import Callable
 
 VSOCK_PORT = 52000
+
+# Each payload, both ways, is followed by its SHA-256. Firecracker 1.13's vsock relay was seen to repeat a
+# 32 KiB block at a 256 KiB boundary of a large guest-to-host reply when the host read slower than the guest
+# wrote (1 run in 8 for a 390 KB reply); the length still matched, so only a checksum notices. A damaged
+# transfer is no one's fault, and the host boots a fresh VM for it (vmhost.TransferError).
+DIGEST_BYTES = 32
+# What the guest answers when the content arrived damaged: the host retries instead of storing it.
+INPUT_DAMAGED = {"error": "TransferDamaged"}
+# hashlib may load OpenSSL lazily on first use; doing it here, at import, keeps that before the syscall filter.
+hashlib.sha256(b"").digest()
 
 # Decompressed by deploy/linux/firecracker/build-image.sh from the host's own /lib/modules, in the
 # dependency order `modinfo` gives (virtio_mmio and vsock have none; the two transport modules need
@@ -222,21 +233,28 @@ def _recv_exact(connection: socket.socket, size: int) -> bytes:
     return b"".join(chunks)
 
 
+class TransferDamaged(Exception):
+    """The bytes that arrived are not the bytes the host sent (their SHA-256 differs)."""
+
+
 def read_item(connection: socket.socket, max_input_bytes: int) -> bytes | None:
     """Length-prefixed, not EOF-terminated: shutdown(SHUT_WR) on a Firecracker vsock-proxied
     connection was observed to tear down the whole channel rather than half-close it, so neither side
     here ever relies on seeing EOF. Returns None, distinct from an empty item, when the host says it's
-    over budget."""
+    over budget. Raises TransferDamaged when the item doesn't match the SHA-256 that follows it."""
     (size,) = struct.unpack(">Q", _recv_exact(connection, 8))
     if size > max_input_bytes:
-        _recv_exact(connection, size)  # drain so the host's send doesn't block on a full buffer
+        _recv_exact(connection, size + DIGEST_BYTES)  # drain so the host's send doesn't block on a full buffer
         return None
-    return _recv_exact(connection, size)
+    raw = _recv_exact(connection, size)
+    if hashlib.sha256(raw).digest() != _recv_exact(connection, DIGEST_BYTES):
+        raise TransferDamaged
+    return raw
 
 
 def send_reply(connection: socket.socket, reply: dict) -> None:
     payload = json.dumps(reply, ensure_ascii=False).encode()
-    connection.sendall(struct.pack(">Q", len(payload)) + payload)
+    connection.sendall(struct.pack(">Q", len(payload)) + payload + hashlib.sha256(payload).digest())
     # Firecracker relays vsock bytes to the host's Unix socket asynchronously; without waiting here,
     # the triple fault from power_off() can win the race and the VM vanishes before the reply crosses
     # over. The host side sends this one byte back only once it has read the whole reply.
@@ -279,6 +297,8 @@ def run(build_reply: Callable[[bytes], dict], max_input_bytes: int, memory_bytes
     try:
         raw = read_item(connection, max_input_bytes)
         reply = {"error": "too large"} if raw is None else build_reply(raw)
+    except TransferDamaged:
+        reply = INPUT_DAMAGED
     except Exception as error:  # noqa: BLE001 - report, never raise into a traceback
         reply = {"error": type(error).__name__}
     try:

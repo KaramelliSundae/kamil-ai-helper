@@ -62,16 +62,16 @@ export function ReplyComposer({ connection, itemKey, title, to, onSent, onSaved,
   };
 
   const write = () => run('writing', async () => {
-    const text = await api.replyText(itemKey);
+    const text = await api.replyText(connection, itemKey);
     bodyState.set(text);
     setBody(text);
   });
   const send = () => run('sending', async () => {
-    const { sentCopy } = await api.sendReply(itemKey, recipient, body);
+    const { sentCopy } = await api.sendReply(connection, itemKey, recipient, body);
     onSent(sentCopy !== false);
   });
   const save = () => run('saving', async () => {
-    await api.saveReply(itemKey, recipient, body);
+    await api.saveReply(connection, itemKey, recipient, body);
     onSaved();
   });
   const openInApp = () => {

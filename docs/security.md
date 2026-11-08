@@ -108,7 +108,14 @@ untrusted input, hold private data, and change lasting state all at once.
 - **Drafts.** Kamil cannot send mail. A draft gets a visible warning when its recipient is outside your
   school, when the address was neither typed by you nor the sender of a stored message, or when you never
   asked for a mail. On the server a draft goes out only after you approve it in the app, and only if it is
-  exactly what you saw (hash check). In phone-only mode, where reading also goes through Angus with the inbox opened read-only, it goes from the phone after you tap send, with Eclipse Angus Mail, TLS required and the server's name checked by Android's own verifier, with its copy put in the Sent folder that already exists, the only write to the mailbox, and with no way to reach any of this from the model, or opens in your mail app if you choose.
+  exactly what you saw (hash check). The API that checks this holds no mail password: it hands the approved
+  mail to `ai-ders-mailsend`, a sandbox of its own started once per mail, which holds the password and nothing
+  else. It builds the mail itself, plain text only, from checked fields (bare ASCII addresses, a one-line
+  subject, the conversation's Message-IDs), sends it over TLS (implicit on 465, otherwise STARTTLS that must
+  succeed, the certificate checked either way), puts its copy in the Sent folder that already exists, and
+  keeps its own rate limit where the API cannot write. It can reach the mail servers but nothing on the
+  machine: not the database, the model or the other services. So even a taken-over API could send only a few
+  plain mails from your own address, never read your mailbox. In phone-only mode, where reading also goes through Angus with the inbox opened read-only, it goes from the phone after you tap send, with Eclipse Angus Mail, TLS required and the server's name checked by Android's own verifier, with its copy put in the Sent folder that already exists, the only write to the mailbox, and with no way to reach any of this from the model, or opens in your mail app if you choose.
 - **No dangerous tools.** There is no shell, no web access and no Canvas write. The tool list is closed and
   tested.
 - **Output stays inert.** The chat renders no links or images, so an answer cannot leak data without a tap.
@@ -135,6 +142,14 @@ version numbers, downloads the APK, checks its SHA-256, and hands it to Android'
 and refuses any APK not signed with the key of the installed app, so a tampered download or a stranger's build cannot
 replace it. The check sends GitHub nothing about you beyond the request itself. The download runs in a foreground service, so
 that Android does not freeze it when you leave the app; that is the only use of the foreground service permission.
+
+## Replies
+
+A reply is written only when you tap for it, in the box under a mail, the same way on the server and in phone-only
+mode. The model sees the conversation fenced as untrusted, with no tools, and writes only the body: the address and
+the subject come from the mail's own headers (the sender's address, never a Reply-To the mail asked for). On the
+server the local model writes it, and a cloud model only when mail is allowed to go there. The text only fills the
+box; you read it, change it, and send or keep it in Onaylar yourself.
 
 ## The other server services
 

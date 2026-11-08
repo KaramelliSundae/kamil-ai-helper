@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 
-import { phoneApi } from './phone/api';
+import { openMailto, phoneApi } from './phone/api';
 import type { ModelOption, Provider } from './phone/cloud';
 import type {
   ChatMessage,
@@ -149,11 +149,21 @@ export const api = {
     c.mode === 'phone'
       ? phoneApi.keepTask(key)
       : request<{ status: string }>(c, '/v1/tasks/keep', 'POST', { key }),
-  // Replying from inside the app is phone mode only for now: only there does a mail know its address.
-  replyText: (key: string) => phoneApi.replyText(key),
-  saveReply: (key: string, to: string, body: string) => phoneApi.saveReply(key, to, body),
-  sendReply: (key: string, to: string, body: string) => phoneApi.sendReply(key, to, body),
-  updateDraft: (draft: Draft, change: { to: string; subject: string; body: string }) => phoneApi.updateDraft(draft, change),
+  // Replies work the same in both modes. A server from before them sends no `replyTo`, so no reply box shows.
+  replyText: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? phoneApi.replyText(key)
+      : request<{ body: string }>(c, '/v1/mail/reply-text', 'POST', { key }).then(({ body }) => body),
+  saveReply: (c: Connection, key: string, to: string, body: string) =>
+    c.mode === 'phone' ? phoneApi.saveReply(key, to, body) : request<Draft>(c, '/v1/mail/reply', 'POST', { key, to, body }),
+  sendReply: (c: Connection, key: string, to: string, body: string) =>
+    c.mode === 'phone'
+      ? phoneApi.sendReply(key, to, body)
+      : request<{ status: string; sentCopy?: boolean }>(c, '/v1/mail/reply/send', 'POST', { key, to, body }),
+  updateDraft: async (c: Connection, draft: Draft, change: { to: string; subject: string; body: string }) => {
+    if (c.mode === 'phone') return phoneApi.updateDraft(draft, change);
+    await request<Draft>(c, `/v1/drafts/${draft.id}`, 'PUT', { hash: draft.hash, ...change });
+  },
   suggestTask: (c: Connection, key: string) =>
     c.mode === 'phone'
       ? phoneApi.suggestTask(key)
@@ -163,12 +173,26 @@ export const api = {
       ? phoneApi.removeTask(key)
       : request<{ status: string }>(c, '/v1/tasks/remove', 'POST', { key }),
   drafts: (c: Connection) => (c.mode === 'phone' ? phoneApi.drafts() : request<Draft[]>(c, '/v1/drafts', 'GET')),
-  sendDraft: (c: Connection, draft: Draft) =>
+  /** As in phone mode: a server that can't send opens the draft in the mail app instead. */
+  sendDraft: async (c: Connection, draft: Draft): Promise<{ status: string; sentCopy?: boolean }> => {
+    if (c.mode === 'phone') return phoneApi.sendDraft(draft);
+    if (!(await api.canSendMail(c))) return api.openDraftInMailApp(c, draft);
+    return request<{ status: string; sentCopy?: boolean }>(c, `/v1/drafts/${draft.id}/send`, 'POST', { hash: draft.hash });
+  },
+  canSendMail: (c: Connection): Promise<boolean> =>
     c.mode === 'phone'
-      ? phoneApi.sendDraft(draft)
-      : request<{ status: string; sentCopy?: boolean }>(c, `/v1/drafts/${draft.id}/send`, 'POST', { hash: draft.hash }),
-  canSendMail: (c: Connection) => (c.mode === 'phone' ? phoneApi.canSendMail() : Promise.resolve(true)),
-  openDraftInMailApp: (draft: Draft) => phoneApi.openDraftInMailApp(draft),
+      ? phoneApi.canSendMail()
+      // A server from before the sending sandbox has no such route, and always sent by itself.
+      : request<{ canSend: boolean }>(c, '/v1/mail/can-send', 'GET').then(
+          ({ canSend }) => canSend,
+          (error) => (error instanceof ApiError && error.status === 404 ? true : Promise.reject(error)),
+        ),
+  /** Opens on this phone either way; a server is then told, with the version the student saw, so it leaves Onaylar. */
+  openDraftInMailApp: async (c: Connection, draft: Draft): Promise<{ status: string }> => {
+    if (c.mode === 'phone') return phoneApi.openDraftInMailApp(draft);
+    await openMailto(draft);
+    return request<{ status: string }>(c, `/v1/drafts/${draft.id}/opened`, 'POST', { hash: draft.hash });
+  },
   discardDraft: (c: Connection, draft: Draft) =>
     c.mode === 'phone'
       ? phoneApi.discardDraft(draft)

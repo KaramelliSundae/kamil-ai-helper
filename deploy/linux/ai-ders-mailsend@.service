@@ -1,0 +1,67 @@
+# Sends one approved mail: JSON on stdin, JSON on stdout, then exits. See ai_ders/mailsend.py.
+# The only process that holds the mail password for sending. It builds the mail itself from checked fields,
+# keeps its own rate limit where the API can't write, and can reach the network but nothing on this machine:
+# not the database, not the other services, not the model.
+[Unit]
+Description=AI Ders mail sender (one mail)
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/opt/ai-ders/.venv/bin/python -I -B -m ai_ders.mailsend
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+EnvironmentFile=/etc/ai-ders/env
+LoadCredentialEncrypted=mail_password:/etc/ai-ders/creds/mail_password.cred
+
+DynamicUser=yes
+# The rate limit's record: in /var/lib/private, owned by this service alone.
+StateDirectory=ai-ders-mailsend
+StateDirectoryMode=0700
+UMask=0077
+
+# SMTP and the Sent copy each have their own 30 s timeouts; this is the backstop.
+RuntimeMaxSec=120
+MemoryMax=256M
+MemorySwapMax=0
+TasksMax=8
+LimitNOFILE=64
+# It holds the decrypted password; a crash must not write it to disk.
+LimitCORE=0
+
+# Out to the mail servers, and nothing on this machine or its local links. 127.0.0.53 is systemd-resolved's
+# stub, for names when NSS can't use resolved's socket.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=localhost link-local multicast
+IPAddressAllow=127.0.0.53/32
+PrivateDevices=yes
+PrivateTmp=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/etc/ai-ders -/var/lib/ai-ders
+NoExecPaths=/
+ExecPaths=/opt/ai-ders /usr/lib64 /usr/lib
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug @module @raw-io @reboot @swap @cpu-emulation @obsolete
+SystemCallErrorNumber=EPERM
