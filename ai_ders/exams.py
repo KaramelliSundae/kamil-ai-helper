@@ -1,4 +1,4 @@
-"""Finding midterm and final dates.
+"""Finding midterm and final dates, and quiz dates that announcements give.
 
 Nothing about this is standard. A date may be in an announcement, in Canvas as an assignment, on the syllabus page, in a PDF
 under Files, or behind a OneDrive link; often the syllabus only says "week 8". So everything found is kept with how far it can
@@ -42,6 +42,9 @@ EARLIEST_DAYS, LATEST_DAYS = 240, 400  # a date further than this from today is 
 MIDTERM = r"mid[\s-]?terms?(?:\s+exams?)?|ara\s*s[ıi]nav(?:[ıi])?|vize(?:\s*s[ıi]nav[ıi])?|vizesi"
 FINAL = r"finals?(?:\s+exams?)?|final\s*s[ıi]nav[ıi]|finali|y[ıa]r[ıi]y[ıi]l\s*sonu(?:\s*s[ıi]nav[ıi])?|d[öo]nem\s*sonu(?:\s*s[ıi]nav[ıi])?"
 KEYWORD = re.compile(rf"(?<![\w])(?P<midterm>{MIDTERM})(?![\w])|(?<![\w])(?P<final>{FINAL})(?![\w])", re.IGNORECASE)
+# Quizzes only from announcements: a syllabus lists "weekly quizzes" and a dozen of them, which would only be noise.
+QUIZ = r"quiz|k[ıi]sa\s*s[ıi]nav"
+WITH_QUIZ = re.compile(rf"{KEYWORD.pattern}|(?<![\w])(?P<quiz>{QUIZ})(?![\w])", re.IGNORECASE)
 # A line about results, weights or other work mentions an exam without saying when it is.
 NOT_A_DATE = re.compile(
     r"sonu[çc]|result|grade|graded|notu|notlar|weight|%|y[üu]zde|percent|proje|project|report|rapor|paper|essay|"
@@ -58,6 +61,11 @@ MONTHS = {
     "nov": 11, "december": 12, "dec": 12,
 }
 MONTH = "|".join(sorted(MONTHS, key=len, reverse=True))
+# "Quiz 3", not "quiz 12 Kasım" (a day) or "quiz 3. hafta" (a week).
+QUIZ_NUMBER_AFTER = re.compile(
+    rf"\s*[-#:]?\s*(\d{{1,2}})(?!\d)(?![.,:/]\d)(?!\.?\s*(?:hafta|week|(?:{MONTH})\b))", re.IGNORECASE
+)
+QUIZ_NUMBER_BEFORE = re.compile(r"(?<!\d)(\d{1,2})\s*\.\s*$")
 DAY_MONTH = re.compile(rf"(?<![\d.])(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({MONTH})\b\.?(?:,?\s*(\d{{4}}))?", re.IGNORECASE)
 MONTH_DAY = re.compile(rf"\b({MONTH})\b\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?(?![\d:])(?:,?\s*(\d{{4}}))?", re.IGNORECASE)
 NUMERIC_YEAR = re.compile(r"(?<![\d.])(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)")
@@ -83,7 +91,7 @@ LOGIN_HOSTS = ("login.microsoftonline.com", "login.live.com")
 
 @dataclass(frozen=True)
 class Found:
-    kind: str  # midterm | final
+    kind: str  # midterm | final | quiz
     number: int  # 0 when there is only one
     starts_on: date
     ends_on: date | None  # a whole week, when only the week is known
@@ -167,6 +175,20 @@ def _number(text: str, start: int, end: int) -> int:
     return 0
 
 
+def quiz_number(text: str, start: int = 0, end: int | None = None) -> int:
+    """ "Quiz 3", "Quiz #3", "3. Quiz": 3. 0 when the quiz has no number. Without bounds, the first quiz in `text`."""
+    if end is None:
+        match = re.search(rf"(?<![\w])(?:{QUIZ})(?![\w])", text, re.IGNORECASE)
+        if not match:
+            return 0
+        start, end = match.start(), match.end()
+    after = QUIZ_NUMBER_AFTER.match(text[end:])
+    if after:
+        return int(after[1])
+    before = QUIZ_NUMBER_BEFORE.search(text[:start])
+    return int(before[1]) if before else 0
+
+
 def _chunks(text: str) -> list[str]:
     chunks: list[str] = []
     for line in text.splitlines():
@@ -174,12 +196,16 @@ def _chunks(text: str) -> list[str]:
     return chunks
 
 
-def find_exams(text: str, today: date, term_start: date | None, dated_status: str, source: str, url: str = "") -> list[Found]:
-    """Every exam the text gives a time for. `dated_status` is how far a date in this kind of text can be trusted."""
+def find_exams(
+    text: str, today: date, term_start: date | None, dated_status: str, source: str, url: str = "", quizzes: bool = False,
+) -> list[Found]:
+    """Every exam the text gives a time for. `dated_status` is how far a date in this kind of text can be trusted. With
+    `quizzes`, quizzes too, but only with a date: a quiz "in week 5" is too loose to be worth a row."""
+    pattern = WITH_QUIZ if quizzes else KEYWORD
     found: list[Found] = []
     chunks = _chunks(text)
     for index, chunk in enumerate(chunks):
-        matches = list(KEYWORD.finditer(chunk))
+        matches = list(pattern.finditer(chunk))
         for position, match in enumerate(matches):
             # Two exams on one line: "Midterm: 14 Kasım, Final: 12 Ocak" or "14 Kasım Midterm, 12 Ocak Final". What comes before
             # the first of them says which way round the line is, and each exam gets only its own words.
@@ -191,15 +217,17 @@ def find_exams(text: str, today: date, term_start: date | None, dated_status: st
                 part = chunk[match.end() : matches[position + 1].start() if position + 1 < len(matches) else len(chunk)]
             if NOT_A_DATE.search(part):
                 continue
-            kind = "midterm" if match["midterm"] else "final"
-            number = _number(chunk, match.start(), match.end())
+            kind = "midterm" if match["midterm"] else "final" if match["final"] else "quiz"
+            number = quiz_number(chunk, match.start(), match.end()) if kind == "quiz" else _number(chunk, match.start(), match.end())
             evidence = chunk[:MAX_EVIDENCE_CHARS]
             when = find_date(part, today)
             # A bare exam name may be a table's first cell, with the date starting the next line. Any later date proves nothing.
-            if when is None and len(chunks) > index + 1 and len(chunk) <= 24 and not KEYWORD.search(chunks[index + 1]):
+            if when is None and len(chunks) > index + 1 and len(chunk) <= 24 and not pattern.search(chunks[index + 1]):
                 when = find_date(chunks[index + 1][:20], today)
             if when:
                 found.append(Found(kind, number, when, None, dated_status, None, source, evidence, url))
+                continue
+            if kind == "quiz":
                 continue
             weeks = find_week(part)
             if weeks is None and position == 0 and not match[0].lower().endswith("s"):
@@ -247,7 +275,7 @@ def exams_in_items(items: Iterable[Item], today: date, term_starts: dict[str, da
             continue
         if item.kind == "announcement":
             text = f"{item.title}\n{item.body}"
-            found = find_exams(text, today, term_starts.get(item.course), ANNOUNCED, "announcement", item.url)
+            found = find_exams(text, today, term_starts.get(item.course), ANNOUNCED, "announcement", item.url, quizzes=True)
             # An announcement that gives only a week is the teacher's word on the week, and still not a date.
         elif item.kind in ("assignment", "quiz", "event") and item.due_at and is_exam_title(item.title):
             match = KEYWORD.search(item.title)

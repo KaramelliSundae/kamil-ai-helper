@@ -10,7 +10,7 @@ import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
-import { isExamTitle } from './exams';
+import { isExamTitle, quizNumber } from './exams';
 import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays } from './settings';
 import { parseMailHost } from './mail';
 import { writeReply } from './reply';
@@ -103,6 +103,13 @@ export const phoneApi = {
       .filter((i) => i.kind === 'quiz' && i.dueAt && !i.submitted && Date.parse(i.dueAt) >= now && !isExamTitle(i.title))
       .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))
       .map((i) => ({ key: i.key, kind: i.kind, title: i.title, course: i.course, url: i.url, dueAt: i.dueAt!, inTasks: !!state.meta.gtasks?.[i.key] }));
+    const coming = Object.entries(state.exams ?? {})
+      .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
+      .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
+      .map(([key, exam]) => ({ ...exam, key, inTasks: !!state.meta.gtasks?.[key] }));
+    /** An announced quiz that Canvas also lists: same course, and the same number or the same day. */
+    const sameQuiz = (exam: { course: string; number: number; startsOn: string }, quiz: { course: string; title: string; dueAt: string }) =>
+      quiz.course === exam.course && (localDay(quiz.dueAt) === exam.startsOn || (exam.number > 0 && quizNumber(quiz.title) === exam.number));
     const ready = !!settings.geminiKey;
     return {
       upcoming,
@@ -112,15 +119,14 @@ export const phoneApi = {
       tasksEnabled: true,
       tasksOutdated: outdatedTasks(state, localDay(new Date(now).toISOString())),
       quizzes,
-      exams: Object.entries(state.exams ?? {})
-        .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
-        .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))
-        .map(([key, exam]) => ({ ...exam, key, inTasks: !!state.meta.gtasks?.[key] })),
+      exams: coming.filter((exam) => exam.kind !== 'quiz'),
+      // Quizzes found in announcements; one Canvas also lists shows once, as the Canvas quiz, which knows the hour.
+      quizExams: coming.filter((exam) => exam.kind === 'quiz' && !quizzes.some((quiz) => sameQuiz(exam, quiz))),
       examsScanning: !state.meta.firstScanDone,
       examsScanProgress: state.meta.firstScanDone ? undefined : state.meta.firstScanProgress,
       examsMissing: Object.values(state.examCourses ?? {})
         // A course with no exam ahead belongs here, or it shows nowhere: a past estimate or a syllabus without dates is no answer.
-        .filter((row) => !Object.values(state.exams ?? {}).some((exam) => exam.course === row.course && (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10)))
+        .filter((row) => !Object.values(state.exams ?? {}).some((exam) => exam.kind !== 'quiz' && exam.course === row.course && (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10)))
         .map((row) => ({ course: row.course, hint: row.hint })),
     };
   },

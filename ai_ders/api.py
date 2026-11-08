@@ -26,7 +26,7 @@ from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import PROVIDER_NAMES, GeminiClient, LlmBusy, LlmClient, clean_base_url, cloud_models, gemini_models
 from .suggest import clean_title, suggest_tasks
-from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS, is_exam_title
+from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS, is_exam_title, quiz_number
 from .mailbox import OUTGOING_PREFIX
 from .mailsend import MailSender, MailSendError, OutgoingMail, recipients
 from .mailthread import plain_subject, reply_references, reply_subject
@@ -166,7 +166,7 @@ def exam_json(row: Any) -> dict[str, Any]:
 
 def exam_task(exam: Any) -> tuple[str, str]:
     """An exam's course and date say it all, so no model is involved."""
-    name = "Vize" if exam["kind"] == "midterm" else "Final"
+    name = {"midterm": "Vize", "final": "Final"}.get(exam["kind"], "Quiz")
     name += f" {exam['number']}" if exam["number"] else ""
     guessed = exam["status"] == "estimated"
     week = f"Tahmini tarih: {exam['week']}. hafta. Kesinleşince kontrol et." if guessed else ""
@@ -296,13 +296,29 @@ def create_app(
             for row in store.exams()
             if date.fromisoformat(row["ends_on"] or row["starts_on"]) >= today_here
         ]
+
+        def same_quiz(found: dict[str, Any], quiz: dict[str, Any]) -> bool:
+            """An announced quiz that Canvas also lists: same course, and the same number or the same day."""
+            day = to_time(quiz["dueAt"]).astimezone(settings.timezone).date().isoformat()
+            number = quiz_number(quiz["title"])
+            return quiz["course"] == found["course"] and (
+                day == found["startsOn"] or (found["number"] > 0 and number == found["number"])
+            )
+
+        # Quizzes found in announcements, in a field of their own too: an older app would call any other kind a final.
+        # One Canvas also lists shows once, as the Canvas quiz, which knows the hour.
+        quiz_exams = [
+            exam for exam in coming if exam["kind"] == "quiz" and not any(same_quiz(exam, quiz) for quiz in quizzes)
+        ]
+        coming = [exam for exam in coming if exam["kind"] != "quiz"]
         missing = [
             {"course": row["course"], "hint": row["hint"]} for row in store.exam_courses()
             if not row["has_syllabus"] and not any(exam["course"] == row["course"] for exam in coming)
         ]
         return {
             "upcoming": upcoming, "pendingDrafts": len(store.pending_drafts()), "gpu": gpu_state(),
-            "tasksEnabled": tasks is not None, "exams": coming, "quizzes": quizzes, "examsMissing": missing,
+            "tasksEnabled": tasks is not None, "exams": coming, "quizzes": quizzes,
+            "quizExams": quiz_exams, "examsMissing": missing,
             "tasksOutdated": outdated_tasks(store) if tasks is not None else [],
         }
 

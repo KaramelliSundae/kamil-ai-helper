@@ -17,7 +17,7 @@ import { htmlToText } from './text';
 
 export type ExamStatus = 'announced' | 'syllabus' | 'estimated';
 export type FoundExam = {
-  kind: 'midterm' | 'final';
+  kind: 'midterm' | 'final' | 'quiz';
   number: number;
   startsOn: string;
   endsOn: string | null;
@@ -43,6 +43,9 @@ const MIDTERM = 'mid[\\s-]?terms?(?:\\s+exams?)?|ara\\s*s[ıi]nav(?:[ıi])?|vize
 const FINAL = 'finals?(?:\\s+exams?)?|final\\s*s[ıi]nav[ıi]|finali|y[ıa]r[ıi]y[ıi]l\\s*sonu(?:\\s*s[ıi]nav[ıi])?|d[öo]nem\\s*sonu(?:\\s*s[ıi]nav[ıi])?';
 const WORD = 'a-zA-Z0-9_çğıöşüÇĞİÖŞÜ';
 const keyword = () => new RegExp(`(?<![${WORD}])(?:(${MIDTERM})|(${FINAL}))(?![${WORD}])`, 'gi');
+// Quizzes only from announcements: a syllabus lists "weekly quizzes" and a dozen of them, which would only be noise.
+const QUIZ = 'quiz|k[ıi]sa\\s*s[ıi]nav';
+const withQuiz = () => new RegExp(`(?<![${WORD}])(?:(${MIDTERM})|(${FINAL})|(${QUIZ}))(?![${WORD}])`, 'gi');
 const NOT_A_DATE = /sonu[çc]|result|grade|graded|notu|notlar|weight|%|y[üu]zde|percent|proje|project|report|rapor|paper|essay|presentation|sunum|[öo]dev|homework|assignment|submission|submit|teslim|deliverable|draft|b[üu]t[üu]nleme|makeup|make-up|mazeret|review session|tekrar dersi/i;
 
 const MONTHS: Record<string, number> = {
@@ -65,6 +68,9 @@ const PLAUSIBLE_ROW_WEEKS = { midterm: [4, 12], final: [10, 18] };
 const NUMBER_AFTER = /^\s*[-#]?\s*([1-3]|ii|i)(?![a-zA-Z0-9])(?!\.?\s*(?:hafta|week))/i;
 const NUMBER_BEFORE = /(?:([1-3])\s*(?:st|nd|rd|\.)|(birinci|first|ikinci|second))\s*$/i;
 const LONG_LIST_ITEM = 40;
+// "Quiz 3", not "quiz 12 Kasım" (a day) or "quiz 3. hafta" (a week).
+const QUIZ_NUMBER_AFTER = new RegExp(`^\\s*[-#:]?\\s*(\\d{1,2})(?!\\d)(?![.,:/]\\d)(?!\\.?\\s*(?:hafta|week|(?:${MONTH})(?![${WORD}])))`, 'i');
+const QUIZ_NUMBER_BEFORE = /(?<!\d)(\d{1,2})\s*\.\s*$/;
 const FILE_LINK = /\/files\/(\d+)/g;
 const MAX_LINKED_FILES = 10;
 const SYLLABUS_WORDS = /syllabus|izlence|outline|course\s*(?:info|plan|description)|ders\s*(?:bilgi|plan|tan[ıi]t)/i;
@@ -126,6 +132,20 @@ function findWeek(text: string): [number, number] | null {
   return null;
 }
 
+/** "Quiz 3", "Quiz #3", "3. Quiz": 3. 0 when the quiz has no number. Without bounds, the first quiz in `text`. */
+export function quizNumber(text: string, start?: number, end?: number): number {
+  if (start === undefined || end === undefined) {
+    const match = new RegExp(`(?<![${WORD}])(?:${QUIZ})(?![${WORD}])`, 'i').exec(text);
+    if (!match) return 0;
+    start = match.index;
+    end = match.index + match[0].length;
+  }
+  const after = text.slice(end).match(QUIZ_NUMBER_AFTER);
+  if (after) return Number(after[1]);
+  const before = text.slice(0, start).match(QUIZ_NUMBER_BEFORE);
+  return before ? Number(before[1]) : 0;
+}
+
 function examNumber(text: string, start: number, end: number): number {
   const after = text.slice(end).match(NUMBER_AFTER);
   if (after) {
@@ -158,11 +178,13 @@ function chunksOf(text: string): string[] {
   return text.split(/\r?\n/).flatMap((line) => line.split(/(?<=[!?;])\s+|(?<=[a-zçğıöşü)]\.)\s+/)).map((part) => part.trim()).filter(Boolean);
 }
 
-export function findExams(text: string, today: Date, termStart: Date | null, datedStatus: ExamStatus, source: string, url = ''): FoundExam[] {
+/** With `quizzes`, quizzes too, but only with a date: a quiz "in week 5" is too loose to be worth a row. */
+export function findExams(text: string, today: Date, termStart: Date | null, datedStatus: ExamStatus, source: string, url = '', quizzes = false): FoundExam[] {
+  const pattern = quizzes ? withQuiz : keyword;
   const found: FoundExam[] = [];
   const chunks = chunksOf(text);
   chunks.forEach((chunk, index) => {
-    const matches = [...chunk.matchAll(keyword())];
+    const matches = [...chunk.matchAll(pattern())];
     matches.forEach((match, position) => {
       const start = match.index ?? 0;
       const finish = start + match[0].length;
@@ -174,15 +196,16 @@ export function findExams(text: string, today: Date, termStart: Date | null, dat
           : chunk.slice(finish, position + 1 < matches.length ? matches[position + 1].index ?? chunk.length : chunk.length);
       }
       if (NOT_A_DATE.test(part)) return;
-      const kind = match[1] ? 'midterm' : 'final';
-      const number = examNumber(chunk, start, start + match[0].length);
+      const kind = match[1] ? 'midterm' : match[2] ? 'final' : 'quiz';
+      const number = kind === 'quiz' ? quizNumber(chunk, start, finish) : examNumber(chunk, start, finish);
       const evidence = chunk.slice(0, MAX_EVIDENCE_CHARS);
       let when = findDate(part, today);
-      if (!when && index + 1 < chunks.length && chunk.length <= 24 && !keyword().test(chunks[index + 1])) when = findDate(chunks[index + 1].slice(0, 20), today);
+      if (!when && index + 1 < chunks.length && chunk.length <= 24 && !pattern().test(chunks[index + 1])) when = findDate(chunks[index + 1].slice(0, 20), today);
       if (when) {
         found.push({ kind, number, startsOn: iso(when), endsOn: null, status: datedStatus, week: null, source, evidence, url });
         return;
       }
+      if (kind === 'quiz') return;
       let weeks = findWeek(part);
       if (!weeks && position === 0 && !match[0].toLowerCase().endsWith('s')) {
         const row = chunk.slice(0, start).match(TABLE_ROW);
@@ -235,7 +258,7 @@ export function examsInItems(items: CanvasItem[], today: Date, termStarts: Recor
     if (!item.course) continue;
     let found: FoundExam[] = [];
     if (item.kind === 'announcement') {
-      found = findExams(`${item.title}\n${item.body}`, today, termStarts[item.course] ?? null, 'announced', 'announcement', item.url);
+      found = findExams(`${item.title}\n${item.body}`, today, termStarts[item.course] ?? null, 'announced', 'announcement', item.url, true);
     } else if (['assignment', 'quiz', 'event'].includes(item.kind) && item.dueAt && !NOT_A_DATE.test(item.title)) {
       const match = [...item.title.matchAll(keyword())][0];
       if (match) {

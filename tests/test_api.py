@@ -591,3 +591,33 @@ def test_canvas_quizzes_also_go_under_exams(client, db):
     }
     assert "quiz:1" in [u["key"] for u in today["upcoming"]]  # and it stays among the work, as before
     assert all(e["kind"] in ("midterm", "final") for e in today["exams"])  # an older app only knows these
+
+
+def test_announced_quizzes_show_once_and_never_as_exams(client, db):
+    from types import SimpleNamespace
+
+    now = datetime.now(UTC)
+    day = lambda days: (now + timedelta(days=days)).astimezone(db_tz()).date()  # noqa: E731
+
+    def announced(course, number, days):
+        found = SimpleNamespace(kind="quiz", number=number, starts_on=day(days), ends_on=None, status="announced",
+                                week=None, source="announcement", evidence=f"Quiz {number}", url="")
+        db.put_exam(course, found, {"announced": 3}, now)
+
+    announced("DD", 3, 2)  # Canvas lists it too, as "Quiz 3": shows once, as the Canvas quiz
+    announced("DD", 4, 9)  # only announced
+    announced("OS", 0, 5)  # no number, but Canvas has a quiz that very day
+    announced("OS", 0, 12)
+    db.upsert(Item(key="quiz:1", kind="quiz", title="Quiz 3", course="DD", due_at=now + timedelta(days=2)), now)
+    db.upsert(Item(key="quiz:2", kind="quiz", title="Lab check", course="OS", due_at=now + timedelta(days=5)), now)
+    today = client.get("/v1/today", headers=AUTH).json()
+    assert [q["key"] for q in today["quizzes"]] == ["quiz:1", "quiz:2"]
+    assert [(e["course"], e["number"]) for e in today["quizExams"]] == [("DD", 4), ("OS", 0)]
+    assert today["quizExams"][1]["startsOn"] == day(12).isoformat()
+    assert all(e["kind"] in ("midterm", "final") for e in today["exams"])
+
+
+def db_tz():
+    from zoneinfo import ZoneInfo
+
+    return ZoneInfo("Europe/Istanbul")

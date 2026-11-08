@@ -63,7 +63,7 @@ export function localDay(iso: string): string {
 type Source = { day: string | null; title: string; notes: string; origin: string; url: string; exam: boolean };
 
 export function examTask(exam: { course: string; kind: string; number: number; status: string; week: number | null; url: string }): { title: string; notes: string } {
-  const name = (exam.kind === 'midterm' ? 'Vize' : 'Final') + (exam.number ? ` ${exam.number}` : '');
+  const name = (exam.kind === 'midterm' ? 'Vize' : exam.kind === 'final' ? 'Final' : 'Quiz') + (exam.number ? ` ${exam.number}` : '');
   const guessed = exam.status === 'estimated';
   const week = guessed ? `Tahmini tarih: ${exam.week}. hafta. Kesinleşince kontrol et.` : '';
   return { title: `${exam.course}: ${name}${guessed ? ' (tahmini)' : ''}`, notes: [week, exam.url].filter(Boolean).join('\n') };

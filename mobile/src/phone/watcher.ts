@@ -192,7 +192,7 @@ async function syncAlarms(state: PhoneState, now: Date): Promise<void> {
   state.scheduled = [...new Set([...state.scheduled.slice(-1500), ...wanted.keys()])];
 }
 
-const EXAM_NAMES = { midterm: 'Vize', final: 'Final' };
+const EXAM_NAMES = { midterm: 'Vize', final: 'Final', quiz: 'Quiz' };
 const TASK_MOVED = "Google Tasks'taki görev eski tarihte. Bugün ekranından güncelleyebilirsin.";
 const COURSES_PER_ROUND = 2; // a background round has little time, and each file is a Gemini request
 
@@ -206,7 +206,8 @@ function recordExams(state: PhoneState, course: string, found: FoundExam[], now:
     state.exams[key] = { ...exam, course };
     const inTasks = !!state.meta.gtasks?.[key];
     // Any date is worth a word once it is in the student's Tasks, however unsure it is.
-    if (!quiet && (exam.status === 'announced' || inTasks)) {
+    // A quiz's announcement was a notification of its own already; its row only speaks up for a task it moved.
+    if (!quiet && ((exam.status === 'announced' && exam.kind !== 'quiz') || inTasks)) {
       const verb = (old && old.status === exam.status) || exam.status !== 'announced' ? 'tarihi değişti' : 'tarihi açıklandı';
       const name = EXAM_NAMES[exam.kind] + (exam.number ? ` ${exam.number}` : '');
       addEvent(state, {

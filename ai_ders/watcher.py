@@ -135,7 +135,7 @@ def poll_canvas(canvas: CanvasClient, now: datetime) -> list[Item]:
     return list({item.key: item for item in reversed(items)}.values())
 
 
-EXAM_NAMES = {"midterm": "Vize", "final": "Final"}
+EXAM_NAMES = {"midterm": "Vize", "final": "Final", "quiz": "Quiz"}
 EXAM_SCAN_SECONDS = 120.0  # one round does this much; courses it did not reach wait for the next
 
 
@@ -151,7 +151,8 @@ def record_exams(store: Store, settings: Settings, course: str, found: list[exam
         key = f"exam:{course}:{item.kind}:{item.number}"
         in_tasks = store.get_meta(f"gtask:{key}") is not None
         # Any date is worth a word once it is in the student's Tasks, however unsure it is.
-        if change and not quiet and (item.status == exams.ANNOUNCED or in_tasks):
+        # A quiz's announcement was a notification of its own already; its row only speaks up for a task it moved.
+        if change and not quiet and ((item.status == exams.ANNOUNCED and item.kind != "quiz") or in_tasks):
             day = item.starts_on.strftime("%d.%m.%Y")
             verb = "tarihi değişti" if change == "moved" or item.status != exams.ANNOUNCED else "tarihi açıklandı"
             note = f"\n{TASK_MOVED}" if in_tasks else ""

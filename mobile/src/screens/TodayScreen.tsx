@@ -61,7 +61,7 @@ function localDayOf(iso: string): string {
 }
 
 function examName(exam: Exam): string {
-  return (exam.kind === 'midterm' ? 'Vize' : 'Final') + (exam.number ? ` ${exam.number}` : '');
+  return (exam.kind === 'midterm' ? 'Vize' : exam.kind === 'final' ? 'Final' : 'Quiz') + (exam.number ? ` ${exam.number}` : '');
 }
 
 function examWhen(exam: Exam): string {
@@ -85,7 +85,7 @@ function ExamRow({ exam, now, onOpen, onAddTask, onRemoveTask }: {
       <Row horizontalArrangement={{ spacedBy: 14 }} verticalAlignment="center">
         <ShapeIcon
           icon={courseIcon(exam.course)}
-          shape={exam.kind === 'final' ? shapes.Boom : shapes.Clover4Leaf}
+          shape={exam.kind === 'final' ? shapes.Boom : exam.kind === 'quiz' ? KINDS.quiz.shape : shapes.Clover4Leaf}
           container={near ? colors.errorContainer : colors.secondaryContainer}
           content={near ? colors.onErrorContainer : colors.onSecondaryContainer}
         />
@@ -267,7 +267,7 @@ export function TodayScreen({ connection, onOpenDrafts }: {
   const exams = useMemo(
     () => examOrder<ExamRowData>(
       [
-        ...(data?.exams ?? []).map((exam) => ({ key: exam.key, status: exam.status, startsOn: exam.startsOn, exam })),
+        ...[...(data?.exams ?? []), ...(data?.quizExams ?? [])].map((exam) => ({ key: exam.key, status: exam.status, startsOn: exam.startsOn, exam })),
         ...(data?.quizzes ?? []).map((quiz) => ({ key: quiz.key, status: 'announced', startsOn: localDayOf(quiz.dueAt), quiz })),
       ],
       Date.now(),

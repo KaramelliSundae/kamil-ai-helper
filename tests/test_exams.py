@@ -367,3 +367,50 @@ def test_documents_that_cannot_be_read_are_empty():
     assert parse(b"not a document") == ""
     with pytest.raises(Exception):  # noqa: B017 - main() turns this into empty text
         read_docx(b"PK\x03\x04 broken")
+
+
+QUIZ_DAY = date(2026, 11, 8)
+
+
+def test_an_announced_quiz_is_found_with_its_number_and_day():
+    item = Item(
+        key="announcement:1", kind="announcement", title="Quiz 2 - Karnaugh Maps", course="LOGIC",
+        body="Quiz 2 will cover Lecture 5- Karnaugh maps on Thursday, 12 Nov. 2026.",
+    )
+    found = best(exams_in_items([item], QUIZ_DAY, {})["LOGIC"], QUIZ_DAY)
+    assert [(f.kind, f.number, f.starts_on, f.status) for f in found] == [("quiz", 2, date(2026, 11, 12), ANNOUNCED)]
+
+
+@pytest.mark.parametrize(
+    ("text", "number"),
+    [("Quiz #2 is on 12 Kasım.", 2), ("2. quiz 12 Kasım'da.", 2), ("Kısa sınav 12 Kasım'da.", 0), ("Quiz-4: 12 Nov", 4)],
+)
+def test_quiz_numbers(text, number):
+    found = find_exams(text, QUIZ_DAY, None, ANNOUNCED, "announcement", quizzes=True)
+    assert [(f.kind, f.number, f.starts_on) for f in found] == [("quiz", number, date(2026, 11, 12))]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Quiz 2 will be in week 7.",  # no date: too loose for a quiz
+        "Quiz 1 results are announced on 12 Nov.",  # about results, not when it is
+    ],
+)
+def test_loose_or_result_quiz_lines_are_not_quizzes(text):
+    assert find_exams(text, QUIZ_DAY, None, ANNOUNCED, "announcement", quizzes=True) == []
+
+
+def test_syllabi_give_no_quizzes():
+    assert find_exams("Quiz 1: 12 Kasım\nQuiz 2: 19 Kasım", QUIZ_DAY, None, SYLLABUS, "syllabus") == []
+
+
+def test_the_same_quiz_in_two_announcements_is_one_quiz():
+    items = [
+        Item(key=f"announcement:{n}", kind="announcement", title=title, course="DD", body=body)
+        for n, (title, body) in enumerate([
+            ("Quiz 3", "Quiz 3 will be on 10 Nov."), ("Reminder", "Do not forget: Quiz 3 is on Tuesday, 10 November."),
+        ])
+    ]
+    found = best(exams_in_items(items, QUIZ_DAY, {})["DD"], QUIZ_DAY)
+    assert [(f.kind, f.number, f.starts_on) for f in found] == [("quiz", 3, date(2026, 11, 10))]

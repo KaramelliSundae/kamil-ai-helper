@@ -49,7 +49,7 @@ export type ServerJob = {
 export type Exam = {
   key: string;
   course: string;
-  kind: 'midterm' | 'final';
+  kind: 'midterm' | 'final' | 'quiz';
   number: number;
   startsOn: string;
   endsOn: string | null;
@@ -72,6 +72,8 @@ export type Today = {
   exams?: Exam[];
   /** Canvas quizzes still ahead, shown under Sınavlar too. Their own field: an older app knows only midterms and finals. */
   quizzes?: Upcoming[];
+  /** Quizzes found in announcements, as exams. Their own field for the same reason. */
+  quizExams?: Exam[];
   examsMissing?: { course: string; hint: string }[];
   /** The first read of every course's syllabus is still going on. */
   examsScanning?: boolean;
