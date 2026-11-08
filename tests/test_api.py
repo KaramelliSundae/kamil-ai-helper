@@ -569,3 +569,25 @@ def test_the_mode_switch_passes_the_second_word_and_the_refusal_on(api_settings,
 def test_kamil_priority_needs_a_gate_and_reports_a_gate_that_is_down(client, api_settings, sends):
     assert client.post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 404
     assert gated(api_settings, sends).post("/v1/gpu/priority", json={"on": True}, headers=AUTH).status_code == 503
+
+
+def test_canvas_quizzes_also_go_under_exams(client, db):
+    now = datetime.now(UTC)
+    for item in (
+        Item(key="quiz:1", kind="quiz", title="Quiz 3", course="BİL 205", due_at=now + timedelta(days=3)),
+        Item(key="quiz:2", kind="quiz", title="Quiz 4", course="BİL 205", due_at=now + timedelta(days=30)),
+        Item(key="quiz:3", kind="quiz", title="Quiz 2", course="BİL 205", due_at=now + timedelta(days=2), submitted=True),
+        Item(key="quiz:4", kind="quiz", title="Midterm Quiz", course="BİL 205", due_at=now + timedelta(days=5)),
+        Item(key="quiz:5", kind="quiz", title="Quiz 1", course="BİL 205", due_at=now - timedelta(days=1)),
+        Item(key="assignment:1", kind="assignment", title="Ödev 2", course="BİL 205", due_at=now + timedelta(days=4)),
+    ):
+        db.upsert(item, now)
+    today = client.get("/v1/today", headers=AUTH).json()
+    # Still ahead and not handed in; a quiz named after the midterm is listed as that exam instead.
+    assert [q["key"] for q in today["quizzes"]] == ["quiz:1", "quiz:2"]
+    assert today["quizzes"][0] == {
+        "key": "quiz:1", "kind": "quiz", "title": "Quiz 3", "course": "BİL 205", "url": "",
+        "dueAt": today["quizzes"][0]["dueAt"], "inTasks": False,
+    }
+    assert "quiz:1" in [u["key"] for u in today["upcoming"]]  # and it stays among the work, as before
+    assert all(e["kind"] in ("midterm", "final") for e in today["exams"])  # an older app only knows these

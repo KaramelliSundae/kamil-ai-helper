@@ -10,6 +10,7 @@ import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
+import { isExamTitle } from './exams';
 import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays } from './settings';
 import { parseMailHost } from './mail';
 import { writeReply } from './reply';
@@ -97,6 +98,11 @@ export const phoneApi = {
       .filter((i) => i.dueAt && !i.submitted && Date.parse(i.dueAt) >= now && Date.parse(i.dueAt) <= now + UPCOMING_DAYS * 864e5)
       .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))
       .map((i) => ({ key: i.key, kind: i.kind, title: i.title, course: i.course, url: i.url, dueAt: i.dueAt!, inTasks: !!state.meta.gtasks?.[i.key] }));
+    // Canvas quizzes also go under Sınavlar, all that are still ahead. One named after a midterm or final is that exam already.
+    const quizzes = Object.values(state.items)
+      .filter((i) => i.kind === 'quiz' && i.dueAt && !i.submitted && Date.parse(i.dueAt) >= now && !isExamTitle(i.title))
+      .sort((a, b) => Date.parse(a.dueAt!) - Date.parse(b.dueAt!))
+      .map((i) => ({ key: i.key, kind: i.kind, title: i.title, course: i.course, url: i.url, dueAt: i.dueAt!, inTasks: !!state.meta.gtasks?.[i.key] }));
     const ready = !!settings.geminiKey;
     return {
       upcoming,
@@ -105,6 +111,7 @@ export const phoneApi = {
       // Without a Google connection a task still goes out through the share sheet.
       tasksEnabled: true,
       tasksOutdated: outdatedTasks(state, localDay(new Date(now).toISOString())),
+      quizzes,
       exams: Object.entries(state.exams ?? {})
         .filter(([, exam]) => (exam.endsOn ?? exam.startsOn) >= new Date(now).toISOString().slice(0, 10))
         .sort(([, a], [, b]) => a.startsOn.localeCompare(b.startsOn))

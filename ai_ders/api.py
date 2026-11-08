@@ -26,7 +26,7 @@ from .config import Settings
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import PROVIDER_NAMES, GeminiClient, LlmBusy, LlmClient, clean_base_url, cloud_models, gemini_models
 from .suggest import clean_title, suggest_tasks
-from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS
+from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS, is_exam_title
 from .mailbox import OUTGOING_PREFIX
 from .mailsend import MailSender, MailSendError, OutgoingMail, recipients
 from .mailthread import plain_subject, reply_references, reply_subject
@@ -36,6 +36,7 @@ from .store import draft_hash, event_source, Store, to_time
 from .tools import MAIL_TOOLS, Tools, is_school_address
 
 UPCOMING_DAYS = 14
+QUIZ_DAYS = 365  # every quiz still ahead this term: Sınavlar shows them all, not just the next two weeks
 CONVERSATION_LIMIT = 100
 MESSAGE_LIMIT = 200
 # A blank the model left for the student, for example [Adın Soyadın]: the same rule and words as the phone.
@@ -276,13 +277,18 @@ def create_app(
     @app.get("/v1/today", dependencies=guarded)
     def today(store: Db) -> dict[str, Any]:
         now = datetime.now(UTC)
-        rows = store.upcoming(now, now + timedelta(days=UPCOMING_DAYS))
-        upcoming = [
-            {
+        def work(r: Any) -> dict[str, Any]:
+            return {
                 "key": r["key"], "kind": r["kind"], "title": r["title"], "course": r["course"], "url": r["url"],
                 "dueAt": r["due_at"], "inTasks": store.get_meta(f"gtask:{r['key']}") is not None,
             }
-            for r in rows
+
+        upcoming = [work(r) for r in store.upcoming(now, now + timedelta(days=UPCOMING_DAYS))]
+        # Canvas quizzes also go under Sınavlar. Their own field, so an app that knows only midterms and finals
+        # never shows one as an exam. A quiz named after a midterm or final is that exam already.
+        quizzes = [
+            work(r) for r in store.upcoming(now, now + timedelta(days=QUIZ_DAYS))
+            if r["kind"] == "quiz" and not is_exam_title(r["title"])
         ]
         today_here = now.astimezone(settings.timezone).date()
         coming = [
@@ -296,7 +302,7 @@ def create_app(
         ]
         return {
             "upcoming": upcoming, "pendingDrafts": len(store.pending_drafts()), "gpu": gpu_state(),
-            "tasksEnabled": tasks is not None, "exams": coming, "examsMissing": missing,
+            "tasksEnabled": tasks is not None, "exams": coming, "quizzes": quizzes, "examsMissing": missing,
             "tasksOutdated": outdated_tasks(store) if tasks is not None else [],
         }
 

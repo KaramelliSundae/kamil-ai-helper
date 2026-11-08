@@ -70,6 +70,8 @@ export type Today = {
   tasksEnabled?: boolean;
   /** Older servers send neither of these. */
   exams?: Exam[];
+  /** Canvas quizzes still ahead, shown under Sınavlar too. Their own field: an older app knows only midterms and finals. */
+  quizzes?: Upcoming[];
   examsMissing?: { course: string; hint: string }[];
   /** The first read of every course's syllabus is still going on. */
   examsScanning?: boolean;

@@ -51,6 +51,15 @@ function modelStatus(gpu: GpuState): string {
 
 const EXAM_STATUS = { announced: 'Duyuruldu', syllabus: 'Syllabus', estimated: 'Tahmini' } as const;
 
+/** A row under Sınavlar: an exam, or a Canvas quiz shown as the work item it is. */
+type ExamRowData = { key: string; status: string; startsOn: string } & ({ exam: Exam; quiz?: never } | { quiz: Upcoming; exam?: never });
+
+/** 2026-11-14, the day a time falls on here. */
+function localDayOf(iso: string): string {
+  const when = new Date(iso);
+  return `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}`;
+}
+
 function examName(exam: Exam): string {
   return (exam.kind === 'midterm' ? 'Vize' : 'Final') + (exam.number ? ` ${exam.number}` : '');
 }
@@ -254,18 +263,43 @@ export function TodayScreen({ connection, onOpenDrafts }: {
     return () => clearInterval(ticker);
   }, [connection, scanning, setData]);
 
-  const exams = useMemo(() => examOrder(data?.exams ?? [], Date.now()), [data]);
+  // Exams and Canvas quizzes in one list, by the same rule: within a week first, then what is firm, soonest first.
+  const exams = useMemo(
+    () => examOrder<ExamRowData>(
+      [
+        ...(data?.exams ?? []).map((exam) => ({ key: exam.key, status: exam.status, startsOn: exam.startsOn, exam })),
+        ...(data?.quizzes ?? []).map((quiz) => ({ key: quiz.key, status: 'announced', startsOn: localDayOf(quiz.dueAt), quiz })),
+      ],
+      Date.now(),
+    ),
+    [data],
+  );
   const missing = data?.examsMissing ?? [];
   const renderExam = useCallback(
-    ({ item }: { item: Exam }) => (
-      <ExamRow
-        exam={item}
-        now={Date.now()}
-        onOpen={() => setOpenExam(item)}
-        onAddTask={tasksEnabled ? () => void addTask(item) : undefined}
-        onRemoveTask={tasksEnabled ? () => setRemoving({ key: item.key, title: `${item.course}: ${examName(item)}` }) : undefined}
-      />
-    ),
+    ({ item }: { item: ExamRowData }) => {
+      if (item.quiz) {
+        const quiz = item.quiz;
+        return (
+          <DueRow
+            item={quiz}
+            now={Date.now()}
+            onOpen={() => setOpen(quiz)}
+            onAddTask={tasksEnabled ? () => void addTask(quiz) : undefined}
+            onRemoveTask={tasksEnabled ? () => setRemoving(quiz) : undefined}
+          />
+        );
+      }
+      const exam = item.exam;
+      return (
+        <ExamRow
+          exam={exam}
+          now={Date.now()}
+          onOpen={() => setOpenExam(exam)}
+          onAddTask={tasksEnabled ? () => void addTask(exam) : undefined}
+          onRemoveTask={tasksEnabled ? () => setRemoving({ key: exam.key, title: `${exam.course}: ${examName(exam)}` }) : undefined}
+        />
+      );
+    },
     [addTask, tasksEnabled],
   );
 
@@ -356,7 +390,7 @@ export function TodayScreen({ connection, onOpenDrafts }: {
             {renderRow}
           </LazyColumn.Items>
         ) : (
-          <LazyColumn.Items data={exams} keyExtractor={(exam) => exam.key} estimatedItemSize={120}>
+          <LazyColumn.Items data={exams} keyExtractor={(row) => row.key} estimatedItemSize={120}>
             {renderExam}
           </LazyColumn.Items>
         )}

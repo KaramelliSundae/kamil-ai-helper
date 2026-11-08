@@ -234,6 +234,11 @@ def best(found: Iterable[Found], today: date) -> list[Found]:
     return sorted(chosen.values(), key=lambda item: item.starts_on)
 
 
+def is_exam_title(title: str) -> bool:
+    """A Canvas assignment, quiz or event named after a midterm or final: it counts as that exam."""
+    return bool(KEYWORD.search(title)) and not PROJECT_LIKE.search(title)
+
+
 def exams_in_items(items: Iterable[Item], today: date, term_starts: dict[str, date]) -> dict[str, list[Found]]:
     """What Canvas itself says: announcements, and assignments or events named after an exam."""
     by_course: dict[str, list[Found]] = {}
@@ -244,7 +249,7 @@ def exams_in_items(items: Iterable[Item], today: date, term_starts: dict[str, da
             text = f"{item.title}\n{item.body}"
             found = find_exams(text, today, term_starts.get(item.course), ANNOUNCED, "announcement", item.url)
             # An announcement that gives only a week is the teacher's word on the week, and still not a date.
-        elif item.kind in ("assignment", "quiz", "event") and item.due_at and KEYWORD.search(item.title) and not PROJECT_LIKE.search(item.title):
+        elif item.kind in ("assignment", "quiz", "event") and item.due_at and is_exam_title(item.title):
             match = KEYWORD.search(item.title)
             found = [Found(
                 "midterm" if match["midterm"] else "final", _number(item.title, match.start(), match.end()),

@@ -224,6 +224,11 @@ export function bestExams(found: FoundExam[], today: Date): FoundExam[] {
   return [...chosen.values()].sort((a, b) => a.startsOn.localeCompare(b.startsOn));
 }
 
+/** A Canvas assignment, quiz or event named after a midterm or final: it counts as that exam. */
+export function isExamTitle(title: string): boolean {
+  return !NOT_A_DATE.test(title) && keyword().test(title);
+}
+
 export function examsInItems(items: CanvasItem[], today: Date, termStarts: Record<string, Date>): Record<string, FoundExam[]> {
   const byCourse: Record<string, FoundExam[]> = {};
   for (const item of items) {
