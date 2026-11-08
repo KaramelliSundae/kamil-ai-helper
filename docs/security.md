@@ -31,6 +31,23 @@ never parses it. `ai-ders-mailparse@.service` is started by systemd once per mai
 `systemd-analyze security` rates it 0.2 out of 10 (0 is best). A mail that crashes the parser is kept as
 "(açılamayan mail)"; if the sandbox is missing entirely, the poll fails and is retried, so no mail is lost.
 
+### On machines with KVM: a microVM around it
+
+When the server has `/dev/kvm`, `firecracker` and the running kernel's `kernel-devel`, `install.sh` uses
+`ai-ders-mailparse-fc@.service` and `ai-ders-docparse-fc@.service` instead. Each mail or document then
+gets its own Firecracker microVM, booted for it and thrown away after: a separate kernel, enforced by the
+CPU's virtualization, with no disk and no network device, only one vsock connection to the host. Inside
+it the same parser runs as PID 1 behind its own walls, put up before a single byte of the mail is read:
+every capability dropped except the one it needs to power off, the same memory, CPU and time limits, a
+syscall allowlist narrower than the one above, and no memory that is both writable and executable. A bug
+in the parser now has to break out of that process *and* out of a virtual machine to reach the server.
+
+The process that boots the VM never reads the mail itself and runs as a throwaway user with no
+capabilities and its own measured syscall filter. The VM image carries its own copy of the code, so
+`install.sh` rebuilds it on every install. Without KVM the plain sandbox above is used, and `install.sh`
+says so. `PARSER_SANDBOX=systemd` in `/etc/ai-ders/env` forces the plain sandbox on purpose. Firecracker's
+`jailer` is deliberately not used: it needs a root-held setup step that nothing else here has.
+
 Images are decoded only inside the sandbox, and only as JPEG, PNG, GIF or WebP; most recent decoder bugs
 in Pillow were in formats outside that list. Each image is redrawn into a new JPEG without metadata and at
 most 1600 px. The watcher then checks the JPEG's structure without decoding it: only the exact layout the

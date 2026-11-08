@@ -1,7 +1,10 @@
 [Unit]
 Description=AI Ders watcher: Canvas and school mail
-Wants=network-online.target ai-ders-mailparse.socket ai-ders-docparse.socket
-After=network-online.target ai-ders-mailparse.socket ai-ders-docparse.socket
+Wants=network-online.target
+# No Wants= on the parser sockets: install.sh enables whichever pair this machine uses (the Firecracker
+# ones, or the systemd-sandbox ones without KVM), and Wants= here would start the other pair too on
+# every poll. After= on a socket that isn't being started is simply ignored.
+After=network-online.target ai-ders-mailparse.socket ai-ders-docparse.socket ai-ders-mailparse-fc.socket ai-ders-docparse-fc.socket
 
 [Service]
 Type=oneshot
@@ -21,6 +24,7 @@ Nice=15
 CPUWeight=20
 IOSchedulingClass=idle
 MemoryMax=512M
+TasksMax=32
 PrivateDevices=yes
 
 NoNewPrivileges=yes
@@ -35,6 +39,13 @@ RestrictNamespaces=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 CapabilityBoundingSet=
+# This process holds a decrypted Canvas token and mail password in memory; a core dump on crash
+# would otherwise write them to disk in the clear.
+LimitCORE=0
+# Nothing in ai_ders ever execs anything (tests/test_boundaries.py checks tools.py specifically);
+# this backs that at the OS level too, for the whole poll path, not just the tool-calling one.
+NoExecPaths=/
+ExecPaths=/opt/ai-ders /usr/lib64 /usr/lib
 
 # Extra walls: no kernel, clock or other processes in view, no writable-executable memory, and only
 # ordinary service syscalls.

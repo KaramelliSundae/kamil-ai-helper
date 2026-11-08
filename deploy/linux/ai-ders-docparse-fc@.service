@@ -1,0 +1,81 @@
+# Boots one Firecracker microVM per document and relays bytes to and from it. See ai_ders/dphost.py
+# and ai_ders/dpguest.py (the latter runs inside the VM, not here) for the actual boundary: this
+# process never reads the document itself, so its own hardening matters less than the guest's, but it
+# still gets no credentials and no view of /etc/ai-ders or /var/lib/ai-ders.
+#
+# Identical hardening to ai-ders-mailparse-fc@.service, down to the syscall list: both launchers share
+# ai_ders/vmhost.py, so the same unit, the same properties, and the same verification apply (see that
+# unit's own comments for the full reasoning, including the two things only a real confined run caught
+# that tracing alone didn't: plain `clone`, and DeviceAllow without PrivateDevices). Needs /dev/kvm and
+# the firecracker package, and the kernel/initramfs deploy/linux/firecracker/build-image.sh builds
+# under /var/lib/ai-ders-firecracker - the same image ai-ders-mailparse-fc@.service uses, since it's
+# the same venv either way; only the /init-* entrypoint ai_ders.dphost asks for differs.
+[Unit]
+Description=AI Ders document sandbox (one document, Firecracker microVM)
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/opt/ai-ders/.venv/bin/python -I -B -m ai_ders.dphost
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+DynamicUser=yes
+PrivateUsers=yes
+UMask=0077
+
+RuntimeMaxSec=40
+# Firecracker's guest RAM (ai_ders/dphost.py's MEM_SIZE_MIB, 640) is charged to this cgroup too.
+MemoryMax=896M
+MemorySwapMax=0
+TasksMax=16
+CPUQuota=150%
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+LimitNOFILE=256
+# No LimitFSIZE=0 here, unlike the plain sandbox: Firecracker backs guest RAM with a memfd it
+# ftruncate()s to full size, and a file-size limit applies to that too, so the kernel kills it
+# with SIGXFSZ mid-boot. ProtectSystem=strict already leaves only the private /tmp writable, and
+# whatever lands there is tmpfs, charged to MemoryMax above.
+LimitCORE=0
+
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+DeviceAllow=/dev/kvm rw
+PrivateTmp=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/etc/ai-ders -/var/lib/ai-ders
+ReadOnlyPaths=/var/lib/ai-ders-firecracker
+NoExecPaths=/
+ExecPaths=/opt/ai-ders /usr/lib64 /usr/lib /usr/bin/firecracker
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=accept4 access arch_prctl bind brk clock_gettime clock_nanosleep clone clone3 close connect
+SystemCallFilter=dup dup2 epoll_create1 epoll_ctl epoll_wait eventfd2 execve exit_group fcntl fstat
+SystemCallFilter=ftruncate futex getcwd getdents64 getpeername getpid getrandom getsockname gettid
+SystemCallFilter=ioctl kill listen lseek lstat madvise memfd_create mkdir mmap mprotect mremap munmap
+SystemCallFilter=newfstatat openat pipe2 poll prctl pread64 prlimit64 read readlink readlinkat recvfrom
+SystemCallFilter=recvmsg rmdir rseq rt_sigaction rt_sigprocmask rt_sigreturn sched_getaffinity seccomp
+SystemCallFilter=sendto set_robust_list set_tid_address sigaltstack socket stat statx tgkill
+SystemCallFilter=timerfd_create timerfd_settime uname unlink unlinkat vfork wait4 write
+SystemCallErrorNumber=EPERM

@@ -1,0 +1,101 @@
+# Boots one Firecracker microVM per mail and relays bytes to and from it. See ai_ders/fchost.py and
+# ai_ders/fcguest.py (the latter runs inside the VM, not here) for the actual boundary: this process
+# never reads the mail itself, so its own hardening matters less than the guest's, but it still gets
+# no credentials and no view of /etc/ai-ders or /var/lib/ai-ders.
+#
+# Needs /dev/kvm and the firecracker package (dnf install firecracker), and a kernel and initramfs
+# built by deploy/linux/firecracker/build-image.sh under /var/lib/ai-ders-firecracker. The image
+# carries its own copy of /opt/ai-ders, so install.sh rebuilds it on every install: otherwise a deploy
+# (a Pillow security fix, say) would leave the VMs parsing with the old code.
+#
+# The syscall list below is strace-derived the same way ai-ders-mailparse@.service's is, but with
+# `perf trace` instead of strace -f: tracing Firecracker's vcpu thread with ptrace multiplies its
+# ioctl(KVM_RUN) loop enough to blow every timeout in ai_ders.fchost, where perf's tracepoint-based
+# tracing doesn't. Covers both this process and the firecracker child it execs, across a normal mail,
+# an image attachment, an over-budget mail (never boots a VM), a bad image path (the API call fails
+# before any boot, and the process gets torn down), and 500 random bytes (a real parse failure inside the
+# VM, to confirm this process's own syscalls really don't depend on the mail's content - they don't).
+# ioctl can't be narrowed further this way: KVM's entire API is ioctl() with a command number, and
+# SystemCallFilter= matches by syscall name, not by argument, so this still trusts Firecracker's own
+# use of it. Firecracker additionally runs its own default seccomp filter on itself for exactly that
+# reason (see /usr/share/doc/firecracker/seccomp-filter.json); this unit's filter is on top of that,
+# not instead of it.
+#
+# Verified against the real confinement, not just a trace: run as a transient unit carrying every
+# property in this file, which caught what tracing alone couldn't. Plain `clone` is needed alongside
+# `clone3` because RestrictNamespaces= makes clone3 fail with ENOSYS (systemd can't inspect its flags,
+# which sit behind a pointer), so glibc falls back to clone - which a trace of an unconfined run never
+# shows.
+[Unit]
+Description=AI Ders mail sandbox (one mail, Firecracker microVM)
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/opt/ai-ders/.venv/bin/python -I -B -m ai_ders.fchost
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+DynamicUser=yes
+PrivateUsers=yes
+UMask=0077
+
+RuntimeMaxSec=40
+# Firecracker's guest RAM (ai_ders/fchost.py's MEM_SIZE_MIB, 768) is charged to this cgroup too.
+MemoryMax=1G
+MemorySwapMax=0
+TasksMax=16
+CPUQuota=150%
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+LimitNOFILE=256
+# No LimitFSIZE=0 here, unlike the plain sandbox: Firecracker backs guest RAM with a memfd it
+# ftruncate()s to full size, and a file-size limit applies to that too, so the kernel kills it
+# with SIGXFSZ mid-boot. ProtectSystem=strict already leaves only the private /tmp writable, and
+# whatever lands there is tmpfs, charged to MemoryMax above.
+LimitCORE=0
+
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+# Not PrivateDevices=yes: that swaps in a minimal /dev of pseudo-devices only, and DeviceAllow= grants
+# access in the cgroup but doesn't add nodes to it, so /dev/kvm simply isn't there. DeviceAllow= on its
+# own makes the device policy closed (DevicePolicy=auto), so every device except /dev/kvm and the
+# standard pseudo-devices is still refused, even though the real /dev is visible.
+DeviceAllow=/dev/kvm rw
+PrivateTmp=yes
+PrivateIPC=yes
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/etc/ai-ders -/var/lib/ai-ders
+ReadOnlyPaths=/var/lib/ai-ders-firecracker
+NoExecPaths=/
+ExecPaths=/opt/ai-ders /usr/lib64 /usr/lib /usr/bin/firecracker
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+KeyringMode=private
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=accept4 access arch_prctl bind brk clock_gettime clock_nanosleep clone clone3 close connect
+SystemCallFilter=dup dup2 epoll_create1 epoll_ctl epoll_wait eventfd2 execve exit_group fcntl fstat
+SystemCallFilter=ftruncate futex getcwd getdents64 getpeername getpid getrandom getsockname gettid
+SystemCallFilter=ioctl kill listen lseek lstat madvise memfd_create mkdir mmap mprotect mremap munmap
+SystemCallFilter=newfstatat openat pipe2 poll prctl pread64 prlimit64 read readlink readlinkat recvfrom
+SystemCallFilter=recvmsg rmdir rseq rt_sigaction rt_sigprocmask rt_sigreturn sched_getaffinity seccomp
+SystemCallFilter=sendto set_robust_list set_tid_address sigaltstack socket stat statx tgkill
+SystemCallFilter=timerfd_create timerfd_settime uname unlink unlinkat vfork wait4 write
+SystemCallErrorNumber=EPERM

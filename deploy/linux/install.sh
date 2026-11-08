@@ -54,8 +54,39 @@ for dropins in "$here"/private/*.d; do
 done
 command -v restorecon >/dev/null && restorecon -R /etc/systemd/system/ai-ders-*
 systemctl daemon-reload
-systemctl enable --now ai-ders-mailparse.socket
-systemctl enable --now ai-ders-docparse.socket
+
+echo "==> mail and document sandboxes"
+# Every mail and document is read in a sandbox; which one depends on the machine. With KVM, each one gets
+# its own disposable Firecracker microVM: a hardware-enforced kernel boundary on top of everything the
+# systemd sandbox does. Without KVM, the systemd sandbox alone. PARSER_SANDBOX=systemd in
+# /etc/ai-ders/env forces the latter, as a way back if the microVMs ever misbehave.
+set_env() {
+  if grep -q "^$1=" /etc/ai-ders/env; then sed -i "s|^$1=.*|$1=$2|" /etc/ai-ders/env; else echo "$1=$2" >>/etc/ai-ders/env; fi
+}
+why_not=""
+if grep -q '^PARSER_SANDBOX=systemd' /etc/ai-ders/env; then why_not="PARSER_SANDBOX=systemd is set in /etc/ai-ders/env"
+elif [[ ! -w /dev/kvm ]]; then why_not="this machine has no usable /dev/kvm (virtualization off in the firmware, or not a KVM host)"
+elif ! command -v firecracker >/dev/null; then why_not="firecracker is not installed (dnf install firecracker)"
+elif [[ ! -d /usr/src/kernels/$(uname -r) ]]; then why_not="kernel-devel-$(uname -r) is not installed"
+# Rebuilt on every install: the image carries its own copy of /opt/ai-ders, just synced above.
+elif ! bash "$here/firecracker/build-image.sh"; then why_not="building the microVM image failed (see above)"
+fi
+if [[ -z $why_not ]]; then
+  set_env MAIL_PARSER_SOCKET /run/ai-ders-mailparse-fc.sock
+  set_env DOC_PARSER_SOCKET /run/ai-ders-docparse-fc.sock
+  systemctl enable ai-ders-mailparse-fc.socket ai-ders-docparse-fc.socket
+  systemctl restart ai-ders-mailparse-fc.socket ai-ders-docparse-fc.socket
+  systemctl disable --now ai-ders-mailparse.socket ai-ders-docparse.socket 2>/dev/null || true
+  echo "    each mail and document is read in its own Firecracker microVM"
+else
+  set_env MAIL_PARSER_SOCKET /run/ai-ders-mailparse.sock
+  set_env DOC_PARSER_SOCKET /run/ai-ders-docparse.sock
+  systemctl disable --now ai-ders-mailparse-fc.socket ai-ders-docparse-fc.socket 2>/dev/null || true
+  systemctl enable --now ai-ders-mailparse.socket ai-ders-docparse.socket
+  echo "    WARNING: mail and documents are read in the systemd sandbox only, without a microVM around it,"
+  echo "    because $why_not. That sandbox is strong, but a bug in it or in the kernel is one wall away"
+  echo "    from this machine instead of two. Fix the above and run this again to switch."
+fi
 grep -q '^KEEP_AWAKE=yes' /etc/ai-ders/env && systemctl enable --now ai-ders-keepawake.service
 
 if [[ -f /etc/ai-ders/creds/api_token.cred ]]; then

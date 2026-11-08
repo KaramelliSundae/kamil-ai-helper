@@ -1,0 +1,28 @@
+# The mail sandbox when this machine can run Firecracker microVMs: install.sh enables this instead of
+# ai-ders-mailparse.socket whenever /dev/kvm, firecracker and kernel-devel are present and the image builds
+# (deploy/linux/firecracker/build-image.sh, into /var/lib/ai-ders-firecracker), and points
+# MAIL_PARSER_SOCKET here.
+[Unit]
+Description=AI Ders mail sandbox socket (Firecracker)
+
+# Without these the socket would still listen, and every mail handed to it would fail to boot and be
+# stored as unreadable. Not starting at all instead makes the watcher's connect fail, which it already
+# treats as an outage: the poll fails and is retried, and nothing is lost.
+ConditionPathExists=/dev/kvm
+ConditionPathExists=/usr/bin/firecracker
+ConditionPathExists=/var/lib/ai-ders-firecracker/vmlinux
+ConditionPathExists=/var/lib/ai-ders-firecracker/initramfs.cpio.gz
+
+[Socket]
+ListenStream=/run/ai-ders-mailparse-fc.sock
+# Only the ai-ders user (the watcher) may hand it a mail.
+SocketUser=ai-ders
+SocketGroup=ai-ders
+SocketMode=0600
+# Accept=yes is what makes this instantiate ai-ders-mailparse-fc@.service (a template) per connection
+# rather than systemd looking for a plain ai-ders-mailparse-fc.service, which doesn't exist.
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

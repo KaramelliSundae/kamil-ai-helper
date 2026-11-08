@@ -12,7 +12,10 @@ SOURCE = Path(__file__).resolve().parent.parent / "ai_ders"
 NETWORK = re.compile(r"^\s*(?:import|from)\s+(?:httpx|requests|urllib\.request|http\.client|aiohttp|ftplib|smtplib)\b", re.M)
 
 # Modules that handle untrusted text. None of them may open a network connection of their own.
-CONTENT_MODULES = ["text", "mailparse", "rules", "tools", "agent", "watcher", "store", "models"]
+CONTENT_MODULES = [
+    "text", "mailparse", "docparse", "fcguest", "dpguest", "vmguest",
+    "rules", "tools", "agent", "watcher", "store", "models",
+]
 
 
 @pytest.mark.parametrize("module", CONTENT_MODULES)
@@ -23,6 +26,20 @@ def test_content_handling_code_cannot_fetch_anything(module):
 def test_the_only_socket_the_parser_module_opens_is_the_local_sandbox():
     source = (SOURCE / "mailparse.py").read_text()
     assert re.findall(r"socket\.socket\(([^)]*)\)", source) == ["socket.AF_UNIX, socket.SOCK_STREAM"]
+
+
+def test_the_only_socket_the_firecracker_guests_open_is_vsock():
+    # Shared by every guest (ai_ders.fcguest, ai_ders.dpguest): the one socket.socket() call lives in
+    # ai_ders.vmguest, not in either thin per-content wrapper.
+    source = (SOURCE / "vmguest.py").read_text()
+    assert re.findall(r"socket\.socket\(([^)]*)\)", source) == ["socket.AF_VSOCK, socket.SOCK_STREAM"]
+
+
+def test_the_only_sockets_the_firecracker_host_opens_are_local():
+    # Shared by every host launcher (ai_ders.fchost, ai_ders.dphost): Firecracker's API socket and its
+    # vsock relay proxy, both AF_UNIX, both local to this machine.
+    source = (SOURCE / "vmhost.py").read_text()
+    assert set(re.findall(r"socket\.socket\(([^)]*)\)", source)) == {"socket.AF_UNIX, socket.SOCK_STREAM"}
 
 
 def test_no_tool_can_reach_the_web_or_a_shell():

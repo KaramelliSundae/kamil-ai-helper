@@ -90,7 +90,10 @@ def clean_image(data: bytes) -> tuple[bytes, int, int] | None:
                 out = io.BytesIO()
                 picture.save(out, "JPEG", quality=JPEG_QUALITY, optimize=True)
                 return out.getvalue(), picture.width, picture.height
-    except (OSError, ValueError, SyntaxError, EOFError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+    # MemoryError: under the Firecracker guest the memory budget is an address-space limit, so an image
+    # too big to decode raises here instead of the whole parser being killed; skipping just the image
+    # keeps the rest of the mail readable. (Under the systemd sandbox a cgroup kill still loses it all.)
+    except (OSError, ValueError, SyntaxError, EOFError, MemoryError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         return None
 
 

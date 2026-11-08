@@ -156,7 +156,7 @@ export function ServerStatus({ connection, showModes = false }: { connection: Se
       {showModes ? (
         <>
           <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
-            AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta sunucu açılır ve GPU işlere kalır, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
+            AI-Asistan'da Kamil hazır bekler; GPU isteyen bir iş gelince yer açar, iş bitince döner. Compute'ta GPU offload işlerine kalır, sunucular sen söylemeden açılmaz, Kamil'in yerel modeli sen geri alana kadar kapalıdır.
           </Text>
           <Choices
             value={choosing ?? state.mode}

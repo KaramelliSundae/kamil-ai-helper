@@ -12,6 +12,9 @@ mobile/node_modules/
 mobile/.expo/
 mobile/dist/
 mobile/android/
+# Gradle's build cache inside the native modules: binary, machine-specific, never source.
+.gradle/
+mobile/modules/*/android/build/
 mobile/google-services.json
 .DS_Store
 client_secret*.json

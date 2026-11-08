@@ -183,3 +183,17 @@ def test_anything_else_fails_the_shape_check():
     assert not is_clean_jpeg(clean, width + 1, height)  # not the size it claims
     assert not is_clean_jpeg(picture("JPEG", progressive=True), 40, 30)  # a frame type we never write
     assert not is_clean_jpeg(b"\xff\xd8\xff\xd9", 1, 1)
+
+
+def test_an_image_too_big_for_memory_is_skipped_not_the_whole_mail(monkeypatch):
+    # In the Firecracker guest the memory budget is an address-space limit, so decoding an oversized
+    # image raises MemoryError in-process; the rest of the mail must still come through.
+    from PIL import Image as PILImage
+
+    def out_of_memory(*args, **kwargs):
+        raise MemoryError
+
+    monkeypatch.setattr(PILImage, "open", out_of_memory)
+    parsed = parse_here(mail_with((picture(), "image/png", "big.png")))
+    assert parsed.subject == "Üniversite Talks"
+    assert parsed.attachments[0].name == "big.png" and parsed.attachments[0].image is None
