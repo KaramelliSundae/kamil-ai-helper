@@ -80,11 +80,13 @@ function Line({ row, first, last }: { row: GradeRow; first: boolean; last: boole
 }
 
 /** Canvas's Grades page: one course at a time, as a table. It only shows; no row of it ever notifies. */
-export function GradesView({ gradebook, error }: { gradebook: Gradebook | null; error: string | null }) {
+export function GradesView({ gradebook, known, error }: { gradebook: Gradebook | null; /** Courses the app has heard of elsewhere, so a course with no data yet still has its place. */ known: string[]; error: string | null }) {
   const colors = useMaterialColors();
-  const courses = gradebook?.courses ?? [];
+  const read = gradebook?.courses ?? [];
+  const names = useMemo(() => [...new Set([...read.map((one) => one.name), ...known])].sort(), [read, known]);
   const [chosen, setChosen] = useState<string | null>(null);
-  const course = courses.find((one) => one.name === chosen) ?? courses[0];
+  const name = chosen && names.includes(chosen) ? chosen : names[0] ?? null;
+  const course = read.find((one) => one.name === name);
   const rows = useMemo(
     () => [...(course?.rows ?? [])].sort((a, b) => (a.dueAt ?? '9999').localeCompare(b.dueAt ?? '9999')),
     [course],
@@ -92,15 +94,16 @@ export function GradesView({ gradebook, error }: { gradebook: Gradebook | null; 
   return (
     <LazyColumn modifiers={[fillMaxWidth(), weight(1)]} contentPadding={{ start: 16, end: 16, top: 6, bottom: 24 }} verticalArrangement={{ spacedBy: 3 }}>
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {courses.length > 1 ? (
+      {names.length ? (
         <Column modifiers={[padding(0, 0, 0, 8)]}>
           <Row horizontalArrangement="start">
-            <CoursePicker courses={courses.map((one) => one.name)} course={course?.name ?? null} onChange={setChosen} all={false} />
+            <CoursePicker courses={names} course={name} onChange={setChosen} all={false} />
           </Row>
         </Column>
       ) : null}
-      {gradebook && courses.length === 0 ? <Notice>Henüz not tablosu yok. Canvas bir kez okununca burada görünecek.</Notice> : null}
-      {course && rows.length === 0 ? <Notice>Bu derste henüz ödev yok.</Notice> : null}
+      {name && !course ? <Notice>Bu dersin notları henüz okunmadı. Aşağı çekip yenilersen Canvas'tan alınır.</Notice> : null}
+      {!name ? <Notice>Henüz ders yok. Canvas bir kez okununca dersler burada görünecek.</Notice> : null}
+      {course && rows.length === 0 ? <Notice>Bu derste henüz ödev ya da not yok.</Notice> : null}
       {rows.length ? <Head /> : null}
       <LazyColumn.Items data={rows.map((row, index) => ({ row, index }))} keyExtractor={(entry) => `${course?.id}-${entry.index}-${entry.row.name}`} estimatedItemSize={64}>
         {({ item }: { item: { row: GradeRow; index: number } }) => (

@@ -41,7 +41,7 @@ function isUnread(event: EventItem): boolean {
   return event.read === false;
 }
 
-type Filter = 'all' | 'unread' | 'important' | 'conversation' | 'files' | 'school' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder';
+type Filter = 'all' | 'unread' | 'important' | 'conversation' | 'files' | 'school' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder' | 'grades';
 
 const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
   canvas: [
@@ -52,6 +52,8 @@ const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
     { id: 'grade', label: 'Not' },
     { id: 'message', label: 'Mesaj' },
     { id: 'reminder', label: 'Hatırlatma' },
+    // Canvas's Grades page as a table, not a kind of notification: it has its own view.
+    { id: 'grades', label: 'Notlar' },
   ],
   mail: [
     { id: 'unread', label: 'Okunmamış' },
@@ -76,6 +78,7 @@ function matches(event: EventItem, filter: Filter): boolean {
     case 'grade': return event.type === 'graded';
     case 'message': return event.itemKey.startsWith('message:');
     case 'reminder': return event.type === 'reminder';
+    case 'grades': return false;
     case 'work':
       return event.type !== 'reminder' && event.type !== 'graded' && event.type !== 'exam' && event.type !== 'alert'
         && !event.itemKey.startsWith('announcement:') && !event.itemKey.startsWith('message:');
@@ -212,7 +215,6 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
   const { data, setData, error, refreshing, refresh } = useLoad(load);
   const loadGrades = useCallback(() => api.grades(connection), [connection]);
   const grades = useLoad(loadGrades);
-  const [showGrades, setShowGrades] = useState(false);
   const [open, setOpen] = useState<EventItem | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
@@ -292,7 +294,6 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
     const tapped = collapseThreads(data, arrivedAt).find((event) => (event.threadEvents ?? [event]).some((one) => one.id === openEventId));
     if (tapped) {
       setList(sourceOf(tapped));
-      setShowGrades(false);
       setFilter('all');
       setCourse(null);
       openEvent(tapped);
@@ -314,11 +315,14 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
   const entries = useMemo(() => groupByDay(visible, now), [now, visible]);
   const chips = FILTERS[list]
     .map((option) => ({ ...option, count: ofCourse.filter((event) => matches(event, option.id)).length }))
-    .filter((option) => option.count > 0 || option.id === filter);
+    .filter((option) => option.count > 0 || option.id === filter || option.id === 'grades');
   const courses = useMemo(
-    () => (list === 'canvas' ? [...new Set(inList.map((event) => event.current?.course).filter((name): name is string => !!name))].sort() : []),
-    [inList, list],
+    () => (list === 'canvas'
+      ? [...new Set([...inList.map((event) => event.current?.course), ...(grades.data?.courses.map((one) => one.name) ?? [])].filter((name): name is string => !!name))].sort()
+      : []),
+    [grades.data, inList, list],
   );
+  const inGrades = list === 'canvas' && filter === 'grades';
   // Reminders stay out of this: the list does not show them unless asked, and nothing should go that was not on screen.
   const readOnes = inList.filter((event) => event.read === true && event.type !== 'reminder');
 
@@ -369,7 +373,7 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
         <Column modifiers={[fillMaxWidth(), padding(16, 0, 16, 10)]} verticalArrangement={{ spacedBy: 10 }}>
           <Header
             title="Bildirimler"
-            actions={showGrades ? null : (
+            actions={inGrades ? null : (
               <>
                 {unreadIn(list) ? (
                   <IconButton onClick={() => void markAllRead()}>
@@ -385,29 +389,16 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
             )}
           />
           <Choices
-            value={showGrades ? 'grades' : list}
-            onChange={(next: EventSource | 'grades') => {
-              if (next === 'grades') {
-                setShowGrades(true);
-                return;
-              }
-              setShowGrades(false);
-              switchList(next);
-            }}
+            value={list}
+            onChange={switchList}
             options={[
               { value: 'canvas', label: 'Canvas', count: unreadIn('canvas') },
               { value: 'mail', label: 'E-posta', count: unreadIn('mail') },
-              // The Grades page of Canvas as a table. It only shows; grade notifications arrive as before.
-              { value: 'grades', label: 'Notlar', count: 0 },
             ]}
           />
         </Column>
-        {showGrades ? (
-          <GradesView gradebook={grades.data} error={grades.error} />
-        ) : (
-          <>
         <LazyRow modifiers={[fillMaxWidth()]} contentPadding={{ start: 16, end: 16 }} horizontalArrangement={{ spacedBy: 8 }}>
-          {courses.length > 1 ? <CoursePicker courses={courses} course={course} onChange={setCourse} /> : null}
+          {courses.length > 1 && !inGrades ? <CoursePicker courses={courses} course={course} onChange={setCourse} /> : null}
           <FilterChip key="all" selected={filter === 'all'} onClick={() => setFilter('all')}>
             <FilterChip.Label>
               <Text>{`Tümü ${ofCourse.filter((event) => matches(event, 'all')).length}`}</Text>
@@ -416,12 +407,14 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
           {chips.map((option) => (
             <FilterChip key={option.id} selected={filter === option.id} onClick={() => setFilter(filter === option.id ? 'all' : option.id)}>
               <FilterChip.Label>
-                <Text>{`${option.label} ${option.count}`}</Text>
+                <Text>{option.id === 'grades' ? option.label : `${option.label} ${option.count}`}</Text>
               </FilterChip.Label>
             </FilterChip>
           ))}
         </LazyRow>
-        {/* A new newest or another filter starts again from the top: what just arrived is what this page is for. */}
+        {inGrades ? (
+          <GradesView gradebook={grades.data} known={courses} error={grades.error} />
+        ) : (
         <LazyColumn
           key={`${list}-${filter}-${course}-${visible[0]?.id ?? 0}`}
           modifiers={[fillMaxWidth(), weight(1)]}
@@ -446,7 +439,6 @@ export function EventsScreen({ connection, openEventId, onOpened, onOpenDrafts }
             {renderEntry}
           </LazyColumn.Items>
         </LazyColumn>
-          </>
         )}
       </Column>
       {clearing ? (

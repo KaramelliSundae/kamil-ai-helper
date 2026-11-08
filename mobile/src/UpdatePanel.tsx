@@ -136,7 +136,7 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
             <LinearWavyProgressIndicator progress={stage.fraction} modifiers={[fillMaxWidth()]} />
           ) : null}
           {stage.kind === 'downloading' && stage.cancellable ? (
-            <TextButton onClick={cancelUpdate}>
+            <TextButton colors={{ contentColor: onColor }} onClick={cancelUpdate}>
               <Text>İptal</Text>
             </TextButton>
           ) : null}
@@ -152,7 +152,8 @@ export function UpdatePanel({ connection, onlyWhenAvailable }: { connection: Con
               <Text>{busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}</Text>
             </FilledTonalButton>
           )}
-          <TextButton onClick={() => void toggleNotes()}>
+          {/* The default text colour is the primary one, which does not read on the tinted panel. */}
+          <TextButton colors={{ contentColor: onColor }} onClick={() => void toggleNotes()}>
             <Text>{notesOpen ? 'Gizle' : release ? 'Neler değişecek?' : 'Yenilikler'}</Text>
           </TextButton>
           {busy ? <LoadingIndicator /> : null}
