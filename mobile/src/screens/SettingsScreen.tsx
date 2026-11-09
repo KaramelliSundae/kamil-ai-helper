@@ -29,8 +29,7 @@ import { ModelList, PROVIDER_CHOICES, PROVIDER_HINTS } from '../ModelPicker';
 import { cleanBaseUrl, ModelOption, modelOptions, Provider } from '../phone/cloud';
 import { CalendarStatus, DEFAULT_GEMINI_MODEL, loadCalendarStatus, loadGoogleConnected, loadMailSettings, loadPhoneSettings, saveCalendarStatus, saveGoogleConnected, saveMailAccount, saveMailToGemini } from '../phone/settings';
 import { googleProblem } from '../../modules/google-auth';
-import { connectCalendar } from '../phone/calendar';
-import { connectGoogle } from '../phone/tasks';
+import { connectGoogleAll } from '../phone/calendar';
 import { readState } from '../phone/store';
 import { poll } from '../phone/watcher';
 import { connectPhone, forgetPhone } from '../phone/setup';
@@ -189,7 +188,7 @@ function PhonePanel({ connection, onSaved }: Props) {
   return (
     <Panel>
       <SectionTitle icon={icons.today} title="Telefon" />
-      <Hint>Sunucu gerekmez: telefon Canvas'a ve seçtiğin modele kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul mailini ve Google Tasks'ı aşağıdan ekleyebilirsin.</Hint>
+      <Hint>Sunucu gerekmez: telefon Canvas'a ve seçtiğin modele kendisi bağlanır, verileri yalnızca bu telefonda tutar. Okul mailini ve Google hesabını (görevler ve takvim) aşağıdan ekleyebilirsin.</Hint>
       <Field label="Canvas adresi" placeholder="https://canvas.okulun.edu" state={urlState} onChange={setUrl} uri />
       <Field label="Canvas erişim belirteci" state={tokenState} onChange={setToken} secret />
       <Hint>Canvas'ta Hesap → Ayarlar → Yeni erişim belirteci. Kamil bununla yalnızca okur, hiçbir şey göndermez.</Hint>
@@ -238,155 +237,79 @@ function PhonePanel({ connection, onSaved }: Props) {
 
 const GOOGLE_PERMISSIONS = 'https://myaccount.google.com/permissions';
 const GOOGLE_STEPS = [
-  "1. Birazdan Google'ın ekranı açılacak. Görevlerinin durduğu hesabı seç.",
+  "1. Birazdan Google'ın izin ekranı açılacak. Görevlerinin ve takviminin durduğu hesabı seç.",
   '2. "Google bu uygulamayı doğrulamadı" uyarısı çıkarsa Gelişmiş\'e, sonra uygulamaya git\'e bas.',
-  '3. Görevlerine erişim iznini onayla. Kamil yalnızca Tasks\'ı görür; Gmail ve Drive\'a erişemez. Takvim izni ayrıdır ve aşağıdaki Google Takvim bölümünden verilir.',
-  '4. Bitti. Bundan sonra Hatırlatıcı ekle ve sınav düğmeleri görevi doğrudan ekler, tarih değişirse sana sorar.',
-];
-
-const CALENDAR_STEPS = [
-  "1. Birazdan Google'ın izin ekranı açılacak. Etkinliklerin eklenmesini istediğin hesabı seç.",
-  '2. "Google bu uygulamayı doğrulamadı" uyarısı çıkarsa Gelişmiş\'e, sonra uygulamaya git\'e bas.',
-  '3. Takvim iznini onayla. Tasks izni de listelenirse onu da onaylayabilirsin. Kamil yalnızca senin seçtiğin etkinliği ekler, takvimini okumaz.',
+  '3. Görevler ve takvim izinlerini onayla. Kamil yalnızca senin seçtiğin görevi ve etkinliği ekler; takvimini okumaz, Gmail ve Drive\'a erişemez.',
   '4. İzin ekranı hiç açılmazsa ya da hata verirse: Google hesap izinlerinden Kamil\'i kaldır, buraya dönüp yeniden dene.',
-  '5. Bağlanmasa da sorun yok: Takvime ekle, etkinliği telefonunun takvim uygulamasında hazır doldurulmuş açar, orada kaydedersin.',
+  '5. Bağlanmasa da sorun yok: görev paylaşım ekranıyla, etkinlik telefonunun takvim uygulamasında hazır doldurulmuş açılarak eklenir.',
 ];
 
-/** The calendar permission, apart from Tasks. When Google refuses it, this is where the student connects again. */
-function PhoneCalendarPanel() {
+/**
+ * Optional, one connection for Tasks and the calendar: without it a task goes out through the share sheet and an event opens
+ * in the phone's calendar app. Android keeps the permission; nothing secret is stored here. When Google refuses the calendar,
+ * this is where the student connects again.
+ */
+function PhoneGooglePanel() {
   const colors = useMaterialColors();
-  const [status, setStatus] = useState<CalendarStatus>('');
-  const [tasksConnected, setTasksConnected] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [calendar, setCalendar] = useState<CalendarStatus>('');
   const [showSteps, setShowSteps] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadCalendarStatus().then(setStatus, () => undefined);
-    loadGoogleConnected().then(setTasksConnected, () => undefined);
-  }, []);
+  const load = () => {
+    loadGoogleConnected().then(setConnected, () => undefined);
+    loadCalendarStatus().then(setCalendar, () => undefined);
+  };
+  useEffect(load, []);
 
   const connect = async () => {
     setShowSteps(false);
     setBusy(true);
     setError(null);
     try {
-      await connectCalendar();
-      setStatus('ok');
+      await connectGoogleAll();
     } catch (reason) {
-      setStatus('failed');
       setError(googleProblem(reason));
     } finally {
       setBusy(false);
-    }
-  };
-
-  const switchOff = async () => {
-    await saveCalendarStatus('off');
-    setStatus('off');
-  };
-
-  return (
-    <Panel>
-      <SectionTitle icon={icons.event} title="Google Takvim" />
-      {status === 'ok' ? (
-        <>
-          <Text color={colors.primary} style={{ typography: 'bodyMedium', fontWeight: '600' }}>Bağlı: seçtiğin etkinlikler doğrudan takvimine eklenir.</Text>
-          <OutlinedButton onClick={() => setShowSteps(true)}>
-            <Text>Yeniden bağla</Text>
-          </OutlinedButton>
-          <OutlinedButton onClick={() => void switchOff()}>
-            <Text>Bağlantıyı kaldır</Text>
-          </OutlinedButton>
-          <TextButton onClick={() => void Linking.openURL(GOOGLE_PERMISSIONS)}>
-            <Text>Google hesap izinleri</Text>
-          </TextButton>
-        </>
-      ) : (
-        <>
-          {status === 'failed' ? (
-            <Notice tone="error">Takvim izni çalışmadı, bu yüzden etkinlikler takvim uygulamasında açılıyor. İzni yeniden bağlayabilirsin.</Notice>
-          ) : (
-            <Hint>
-              {`${tasksConnected && status === '' ? "Google Tasks bağlı: ilk Takvime ekle'de Google takvim iznini soracak, istersen şimdi de bağlayabilirsin. " : ''}Bağlanmadan da çalışır: Takvime ekle, etkinliği telefonunun takvim uygulamasında hazır doldurulmuş açar. Bağlanırsan doğrudan eklenir.`}
-            </Hint>
-          )}
-          <Busy busy={busy} label={status === 'failed' ? 'Takvim iznini yeniden bağla' : "Google Takvim'e bağlan"} enabled onClick={() => setShowSteps(true)} />
-        </>
-      )}
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      {showSteps ? (
-        <AlertDialog onDismissRequest={() => setShowSteps(false)}>
-          <AlertDialog.Title>
-            <Text>Google Takvim'e bağlanma</Text>
-          </AlertDialog.Title>
-          <AlertDialog.Text>
-            <Text>{CALENDAR_STEPS.join('\n\n')}</Text>
-          </AlertDialog.Text>
-          <AlertDialog.ConfirmButton>
-            <TextButton onClick={() => void connect()}>
-              <Text>Devam et</Text>
-            </TextButton>
-          </AlertDialog.ConfirmButton>
-          <AlertDialog.DismissButton>
-            <TextButton onClick={() => setShowSteps(false)}>
-              <Text>Vazgeç</Text>
-            </TextButton>
-          </AlertDialog.DismissButton>
-        </AlertDialog>
-      ) : null}
-    </Panel>
-  );
-}
-
-/** Optional: without it a task goes out through the share sheet. Android keeps the permission; nothing secret is stored here. */
-function PhoneTasksPanel() {
-  const colors = useMaterialColors();
-  const [connected, setConnected] = useState(false);
-  const [showSteps, setShowSteps] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadGoogleConnected().then(setConnected, () => undefined);
-  }, []);
-
-  const connect = async () => {
-    setShowSteps(false);
-    setBusy(true);
-    setError(null);
-    try {
-      await connectGoogle();
-      setConnected(true);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Google'a bağlanılamadı.");
-    } finally {
-      setBusy(false);
+      load();
     }
   };
 
   const disconnect = async () => {
     await saveGoogleConnected(false);
-    setConnected(false);
+    await saveCalendarStatus('off');
+    load();
   };
 
+  // Tasks connected, but the calendar was never given or was refused: the same one button asks for both again.
+  const calendarMissing = connected && calendar !== 'ok';
   return (
     <Panel>
-      <SectionTitle icon={icons.addTask} title="Google Tasks" />
+      <SectionTitle icon={icons.addTask} title="Google: Görevler ve Takvim" />
       {connected ? (
         <>
-          <Text color={colors.primary} style={{ typography: 'bodyMedium', fontWeight: '600' }}>Bağlı: görevler doğrudan eklenir.</Text>
+          <Text color={colors.primary} style={{ typography: 'bodyMedium', fontWeight: '600' }}>
+            {calendarMissing ? 'Görevler bağlı: doğrudan eklenir.' : 'Bağlı: görevler ve seçtiğin etkinlikler doğrudan eklenir.'}
+          </Text>
+          {calendar === 'failed' ? (
+            <Notice tone="error">Takvim izni çalışmadı, bu yüzden etkinlikler takvim uygulamasında açılıyor. İzni yeniden bağlayabilirsin.</Notice>
+          ) : calendarMissing ? (
+            <Hint>Takvim izni henüz verilmedi: etkinlikler şimdilik takvim uygulamasında açılır. Aşağıdaki düğme görev ve takvim izinlerini birlikte yeniler.</Hint>
+          ) : null}
+          <Busy busy={busy} label="Yeniden bağla" enabled onClick={() => setShowSteps(true)} />
           <OutlinedButton onClick={() => void disconnect()}>
             <Text>Bağlantıyı kaldır</Text>
           </OutlinedButton>
-          <Hint>Kamil bu telefonda artık görev eklemez. İzni tamamen silmek için Google hesap izinlerine git.</Hint>
+          <Hint>Kamil bu telefonda artık görev ve etkinlik eklemez. İzni tamamen silmek için Google hesap izinlerine git.</Hint>
           <TextButton onClick={() => void Linking.openURL(GOOGLE_PERMISSIONS)}>
             <Text>Google hesap izinleri</Text>
           </TextButton>
         </>
       ) : (
         <>
-          <Hint>Bağlanmadan da görev ekleyebilirsin: paylaşım ekranı açılır, Tasks'ı veya başka bir uygulamayı seçersin. Bağlanırsan görev tarihiyle doğrudan eklenir. Gemini anahtarı bunun yerine geçmez.</Hint>
+          <Hint>Bağlanmadan da çalışır: görev için paylaşım ekranı, etkinlik için telefonunun takvim uygulaması açılır. Bağlanırsan görev tarihiyle, etkinlik de doğrudan eklenir. Gemini anahtarı bunun yerine geçmez.</Hint>
           <Busy busy={busy} label="Google hesabına bağlan" enabled onClick={() => setShowSteps(true)} />
         </>
       )}
@@ -712,8 +635,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
 
       {mode === 'phone' ? <PhonePanel connection={connection} onSaved={onSaved} /> : <ServerPanel connection={connection} onSaved={onSaved} />}
       {mode === 'phone' ? <PhoneMailPanel connection={connection} /> : null}
-      {mode === 'phone' ? <PhoneTasksPanel /> : null}
-      {mode === 'phone' ? <PhoneCalendarPanel /> : null}
+      {mode === 'phone' ? <PhoneGooglePanel /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerReport connection={connection} /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerStatus connection={connection} showModes /> : null}
       {mode === 'server' && connection?.mode === 'server' ? <ServerGeminiPanel connection={connection} /> : null}

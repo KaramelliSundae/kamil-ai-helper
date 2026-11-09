@@ -15,7 +15,7 @@ import expo.modules.kotlin.modules.ModuleDefinition
 private const val REQUEST = 41_07
 
 /**
- * Asks Android for a short-lived access token to one Google scope. Google recognises the app by its package name and
+ * Asks Android for a short-lived access token to one Google scope, or to several at once, separated by spaces. Google recognises the app by its package name and
  * signing certificate, so there is no client secret here and no long-lived token to keep. Only that token reaches
  * JavaScript. It lasts an hour, and asking again later needs no screen as long as the permission stands.
  */
@@ -39,7 +39,9 @@ class GoogleAuthModule : Module() {
       val activity: Activity = appContext.activityProvider?.currentActivity
         ?: throw CodedException("ERR_GOOGLE", "The app is not on screen", null)
       if (waiting != null) throw CodedException("ERR_GOOGLE_BUSY", "Already asking", null)
-      val request = AuthorizationRequest.builder().setRequestedScopes(listOf(Scope(scope))).build()
+      // One or more scopes, separated by spaces: Google then shows a single permission screen for all of them.
+      val scopes = scope.split(" ").filter { it.isNotBlank() }.map { Scope(it) }
+      val request = AuthorizationRequest.builder().setRequestedScopes(scopes).build()
       Identity.getAuthorizationClient(activity).authorize(request)
         .addOnSuccessListener { result ->
           val consent = result.pendingIntent

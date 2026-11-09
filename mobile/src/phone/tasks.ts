@@ -14,7 +14,7 @@ import { cleanTitle } from './suggest';
 import { PhoneState, readState, updateState } from './store';
 
 const TASKS_URL = 'https://tasks.googleapis.com/tasks/v1/lists/@default/tasks';
-const SCOPE = 'https://www.googleapis.com/auth/tasks';
+export const SCOPE = 'https://www.googleapis.com/auth/tasks';
 
 export async function token(scope: string = SCOPE): Promise<string> {
   try {
@@ -24,12 +24,6 @@ export async function token(scope: string = SCOPE): Promise<string> {
     throw new ApiError(googleProblem(reason), 502);
   }
   throw new ApiError("Google'a bağlanılamadı.", 502);
-}
-
-/** The first thing asked of a new connection: it opens Google's own permission screen. */
-export async function connectGoogle(): Promise<void> {
-  await token();
-  await saveGoogleConnected(true);
 }
 
 /** `scope` is the one the call needs: Android asks the student for each scope once. */

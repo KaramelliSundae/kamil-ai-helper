@@ -7,8 +7,8 @@ import * as IntentLauncher from 'expo-intent-launcher';
 
 import type { CalendarOption } from '../types';
 import { ApiError } from '../types';
-import { google, localDay, token } from './tasks';
-import { loadCalendarStatus, loadGoogleConnected, saveCalendarStatus } from './settings';
+import { google, localDay, SCOPE, token } from './tasks';
+import { loadCalendarStatus, loadGoogleConnected, saveCalendarStatus, saveGoogleConnected } from './settings';
 import { cleanEvent } from './suggest';
 import { readState, updateState } from './store';
 
@@ -72,16 +72,19 @@ export async function openInCalendar(event: CalendarOption, notes = ''): Promise
 }
 
 /**
- * Opens Google's permission screen for the calendar and remembers the answer. This asks only for the right to add events; it
- * reads nothing, and it is the same call whether the student had Tasks connected before or not.
+ * The one Google connection: a single permission screen for Tasks and the calendar together. It asks for the right to add
+ * tasks and events only; nothing is read. A student who connected Tasks before comes back here to add the calendar.
  */
-export async function connectCalendar(): Promise<void> {
+export async function connectGoogleAll(): Promise<void> {
+  const before = await loadCalendarStatus();
   try {
-    await token(CALENDAR_SCOPE);
+    await token(`${SCOPE} ${CALENDAR_SCOPE}`);
   } catch (reason) {
-    await saveCalendarStatus('failed');
+    // A refusal only counts against the calendar if it was in use; someone who never connected has nothing to mark.
+    if (before === 'ok' || (await loadGoogleConnected())) await saveCalendarStatus('failed');
     throw reason;
   }
+  await saveGoogleConnected(true);
   await saveCalendarStatus('ok');
 }
 
