@@ -16,7 +16,7 @@ export function googleProblem(reason: unknown): string {
   switch ((reason as { code?: string } | null)?.code) {
     case 'ERR_GOOGLE_CANCELLED': return 'Google izni verilmedi.';
     case 'ERR_GOOGLE_NETWORK': return "Google'a ulaşılamadı. İnternet açık mı?";
-    case 'ERR_GOOGLE_CLIENT': return 'Bu sürüm için Google istemcisi henüz kurulmamış. Görevleri paylaşım ekranıyla ekleyebilirsin.';
+    case 'ERR_GOOGLE_CLIENT': return 'Bu sürüm için Google istemcisi henüz kurulmamış. Paylaşım ekranı ve takvim uygulaması yine çalışır.';
     default: return "Google'a bağlanılamadı.";
   }
 }

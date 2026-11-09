@@ -16,9 +16,9 @@ import { PhoneState, readState, updateState } from './store';
 const TASKS_URL = 'https://tasks.googleapis.com/tasks/v1/lists/@default/tasks';
 const SCOPE = 'https://www.googleapis.com/auth/tasks';
 
-async function token(): Promise<string> {
+export async function token(scope: string = SCOPE): Promise<string> {
   try {
-    const access = await googleAccessToken(SCOPE);
+    const access = await googleAccessToken(scope);
     if (access) return access;
   } catch (reason) {
     throw new ApiError(googleProblem(reason), 502);
@@ -32,22 +32,23 @@ export async function connectGoogle(): Promise<void> {
   await saveGoogleConnected(true);
 }
 
-async function google(method: string, url: string, body?: unknown): Promise<Response> {
+/** `scope` is the one the call needs: Android asks the student for each scope once. */
+export async function google(method: string, url: string, body?: unknown, scope: string = SCOPE): Promise<Response> {
   const send = (access: string) => fetch(url, {
     method,
     headers: { Authorization: `Bearer ${access}`, 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const access = await token();
+  const access = await token(scope);
   try {
     const response = await send(access);
     if (response.status !== 401) return response;
     // A cached token that has stopped working: once more with a fresh one.
     await clearGoogleToken(access).catch(() => undefined);
-    return await send(await token());
+    return await send(await token(scope));
   } catch (reason) {
     if (reason instanceof ApiError) throw reason;
-    throw new ApiError("Google Tasks'a ulaşılamadı", 502);
+    throw new ApiError("Google'a ulaşılamadı", 502);
   }
 }
 

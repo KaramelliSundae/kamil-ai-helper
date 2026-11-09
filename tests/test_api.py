@@ -73,7 +73,7 @@ ROUTES = [
     ("get", "/v1/images/" + "a" * 64), ("get", "/v1/settings/gemini"), ("put", "/v1/settings/gemini"),
     ("delete", "/v1/settings/gemini"), ("get", "/v1/settings/gemini/models"), ("get", "/v1/settings/cloud/models"),
     ("get", "/v1/conversations"), ("get", "/v1/conversations/1"), ("delete", "/v1/conversations/1"),
-    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"), ("get", "/v1/grades"),
+    ("delete", "/v1/conversations"), ("post", "/v1/tasks"), ("post", "/v1/tasks/suggest"), ("post", "/v1/tasks/update"), ("post", "/v1/tasks/keep"), ("post", "/v1/tasks/remove"), ("post", "/v1/gpu/priority"), ("get", "/v1/chat/progress/abcdefgh"), ("post", "/v1/events/refresh"), ("delete", "/v1/events/1"), ("get", "/v1/chat/setup"), ("get", "/v1/grades"), ("post", "/v1/calendar"), ("post", "/v1/calendar/suggest"),
     ("put", "/v1/drafts/x"), ("post", "/v1/drafts/x/opened"), ("get", "/v1/mail/can-send"),
     ("post", "/v1/mail/reply-text"), ("post", "/v1/mail/reply"), ("post", "/v1/mail/reply/send"),
 ]
@@ -360,7 +360,7 @@ def test_a_server_without_a_local_model_answers_with_gemini(api_settings, sends)
     client = gemini_only(api_settings, sends, model)
     setup = client.get("/v1/chat/setup", headers=AUTH).json()
     assert [(m["id"], m["name"]) for m in setup["models"]] == [("gemini", "Kamil")]
-    assert setup["features"] == {"localModel": False, "gpuGate": False, "tasks": False}
+    assert setup["features"] == {"localModel": False, "gpuGate": False, "tasks": False, "calendar": False}
     assert setup["schoolDomain"] == "uni.example.edu"
     # An older app asks for the local model; the only model there is answers.
     reply = client.post("/v1/chat", json={"text": "Merhaba", "model": "local"}, headers=AUTH).json()

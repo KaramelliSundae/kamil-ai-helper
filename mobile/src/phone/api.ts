@@ -4,7 +4,7 @@
  */
 import { Linking } from 'react-native';
 
-import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, Gradebook, ItemDetail, TaskOption, Today } from '../types';
+import type { ChatMessage, ChatSetup, Conversation, Draft, EventItem, EventSource, Gradebook, ItemDetail, TaskOption, CalendarOption, Today } from '../types';
 import { isOutgoing, plainSubject } from '../mailThread';
 import { ApiError } from '../types';
 import { answer, cloudModel } from './agent';
@@ -15,7 +15,8 @@ import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays
 import { parseMailHost } from './mail';
 import { writeReply } from './reply';
 import { recipients, sendMail, SmtpError } from './smtp';
-import { suggestTasks } from './suggest';
+import { addEvent, openInCalendar } from './calendar';
+import { suggestEvents, suggestTasks } from './suggest';
 import { addTask, keepTask, localDay, outdatedTasks, removeTask, updateTask } from './tasks';
 import { readState, StoredDraft, updateState } from './store';
 import { poll } from './watcher';
@@ -227,11 +228,27 @@ export const phoneApi = {
   },
 
   addTask,
+  addEvent,
+  openInCalendar,
   updateTask,
   keepTask,
   removeTask,
 
   /** Only when the student taps for it, and it adds nothing. The same rules as chat: mail only if allowed. */
+  async suggestEvents(key: string): Promise<{ events: CalendarOption[] }> {
+    const [state, settings, mail] = await Promise.all([readState(), loadPhoneSettings(), loadMailSettings()]);
+    const row = state.items[key];
+    if (!row) throw new ApiError('kayıt bulunamadı', 404);
+    const config = cloudConfig(settings);
+    if (!config) throw new ApiError('Model bağlı değil', 409);
+    if (row.kind === 'mail' && !mail.toGemini) throw new ApiError('Mailler bulut modele kapalı', 409);
+    try {
+      return { events: await suggestEvents(cloudModel(config, 'Etkinlik önerisi').chat, row, localDay(new Date().toISOString())) };
+    } catch (error) {
+      throw new ApiError(error instanceof Error ? error.message : 'Öneri alınamadı.', 503);
+    }
+  },
+
   async suggestTask(key: string): Promise<{ options: TaskOption[] }> {
     const [state, settings, mail] = await Promise.all([readState(), loadPhoneSettings(), loadMailSettings()]);
     const row = state.items[key];

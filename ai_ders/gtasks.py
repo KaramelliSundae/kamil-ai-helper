@@ -20,6 +20,8 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 TASKS_URL = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks"
 SCOPE = "https://www.googleapis.com/auth/tasks"
+# Only for adding events the student approved, never for reading anyone's calendar. Asked for only with `--calendar`.
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 # Nothing listens here: after consent the browser shows an error page, and its address holds the code.
 REDIRECT_URI = "http://127.0.0.1:8765"
 
@@ -33,11 +35,28 @@ class GoogleCredentials:
     client_id: str
     client_secret: str
     refresh_token: str
+    # What the student agreed to. Older connections hold no list: tasks only.
+    scopes: tuple[str, ...] = (SCOPE,)
 
     @classmethod
     def parse(cls, raw: str) -> GoogleCredentials:
         data = json.loads(raw)
-        return cls(data["client_id"], data["client_secret"], data["refresh_token"])
+        scopes = data.get("scopes")
+        return cls(data["client_id"], data["client_secret"], data["refresh_token"], tuple(scopes) if scopes else (SCOPE,))
+
+
+def access_token(client: httpx.Client, credentials: GoogleCredentials) -> str:
+    """A fresh one-hour token from the refresh token. The same for Tasks and Calendar."""
+    response = client.post(TOKEN_URL, data={
+        "client_id": credentials.client_id,
+        "client_secret": credentials.client_secret,
+        "refresh_token": credentials.refresh_token,
+        "grant_type": "refresh_token",
+    })
+    if response.status_code in (400, 401):
+        raise GoogleTasksError("Google izni geçersiz, Google bağlantısını yeniden kur.")
+    response.raise_for_status()
+    return response.json()["access_token"]
 
 
 class GoogleTasks:
@@ -46,16 +65,7 @@ class GoogleTasks:
         self.client = client or httpx.Client(timeout=20.0)
 
     def _access_token(self) -> str:
-        response = self.client.post(TOKEN_URL, data={
-            "client_id": self.credentials.client_id,
-            "client_secret": self.credentials.client_secret,
-            "refresh_token": self.credentials.refresh_token,
-            "grant_type": "refresh_token",
-        })
-        if response.status_code in (400, 401):
-            raise GoogleTasksError("Google izni geçersiz, Google Tasks bağlantısını yeniden kur.")
-        response.raise_for_status()
-        return response.json()["access_token"]
+        return access_token(self.client, self.credentials)
 
     def add(self, title: str, notes: str, due: date | None) -> str:
         task: dict[str, str] = {"title": title, "notes": notes}
@@ -102,7 +112,7 @@ def read_client_file(path: str) -> tuple[str, str]:
         raise GoogleTasksError(f"istemci dosyası okunamadı: {type(error).__name__}") from error
 
 
-def authorize(client: httpx.Client | None = None, client_file: str | None = None) -> str:
+def authorize(client: httpx.Client | None = None, client_file: str | None = None, calendar: bool = False) -> str:
     """One-time consent in the terminal. Prompts go to stderr; only the credentials JSON goes to stdout."""
     client = client or httpx.Client(timeout=20.0)
     say = sys.stderr.write
@@ -114,8 +124,9 @@ def authorize(client: httpx.Client | None = None, client_file: str | None = None
         sys.stderr.flush()
         client_id = sys.stdin.readline().strip()
         client_secret = getpass("Client secret (görünmez): ").strip()
+    scopes = [SCOPE, CALENDAR_SCOPE] if calendar else [SCOPE]
     query = urlencode({
-        "client_id": client_id, "redirect_uri": REDIRECT_URI, "response_type": "code", "scope": SCOPE,
+        "client_id": client_id, "redirect_uri": REDIRECT_URI, "response_type": "code", "scope": " ".join(scopes),
         "access_type": "offline", "prompt": "consent",
     })
     say(f"\nBu adresi tarayıcıda aç ve izin ver:\n\n{AUTH_URL}?{query}\n\n")
@@ -132,4 +143,5 @@ def authorize(client: httpx.Client | None = None, client_file: str | None = None
         raise GoogleTasksError(f"Google izin vermedi: {response.text[:200]}")
     return json.dumps({
         "client_id": client_id, "client_secret": client_secret, "refresh_token": response.json()["refresh_token"],
+        "scopes": scopes,
     })

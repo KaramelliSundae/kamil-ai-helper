@@ -37,6 +37,7 @@ import { icons } from './icons';
 import { LinkDialog, MailBody } from './MailBody';
 import { loadMailImage } from './mailImages';
 import { hostOf, linkRisk, LinkRisk, splitSender } from './mailText';
+import { EventPicker } from './EventPicker';
 import { TaskPicker } from './TaskPicker';
 import { ReplyComposer } from './ReplyComposer';
 import { Notice, rounded, shapes } from './ui';
@@ -77,6 +78,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   const [note, setNote] = useState<string | null>(null);
   const [taskAdded, setTaskAdded] = useState(!!inTasks);
   const [picking, setPicking] = useState(false);
+  const [findingEvents, setFindingEvents] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk } | null>(null);
@@ -130,6 +132,8 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   const files = detail?.attachments ?? [];
   // Only an announcement or a mail needs the model to say what the task is, and only when asked: an assignment names itself.
   const remindable = !!tasksEnabled && !!detail && !work && !unreadable;
+  // The calendar needs no Google account: without one the phone's own calendar app opens with the event filled in.
+  const datable = !!detail && !work && !unreadable;
 
   const addTask = async () => {
     setError(null);
@@ -175,15 +179,42 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
         </Column>
 
         {/* Up here as well: a long conversation would otherwise push it far down. */}
-        {mail && detail?.replyTo && !replying ? (
-          <Button onClick={() => { setNote(null); setReplying(true); }}>
-            <Icon source={icons.mail} size={18} />
-            <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
-          </Button>
+        {(mail && detail?.replyTo && !replying) || (datable && !findingEvents) ? (
+          <FlowRow horizontalArrangement={{ spacedBy: 8 }} verticalArrangement={{ spacedBy: 8 }}>
+            {mail && detail?.replyTo && !replying ? (
+              <Button onClick={() => { setNote(null); setReplying(true); }}>
+                <Icon source={icons.mail} size={18} />
+                <Text modifiers={[paddingAll(4)]}>Yanıtla</Text>
+              </Button>
+            ) : null}
+            {datable && !findingEvents ? (
+              <FilledTonalButton onClick={() => { setNote(null); setFindingEvents(true); }}>
+                <Icon source={icons.event} size={18} />
+                <Text modifiers={[paddingAll(4)]}>Takvime ekle</Text>
+              </FilledTonalButton>
+            ) : null}
+          </FlowRow>
         ) : null}
 
         {error ? <Notice tone="error">{error}</Notice> : null}
         {note ? <Notice>{note}</Notice> : null}
+        {findingEvents ? (
+          <EventPicker
+            connection={connection}
+            itemKey={target.key}
+            onCancel={() => setFindingEvents(false)}
+            onAdded={(status) => {
+              setFindingEvents(false);
+              setNote(
+                status === 'reconnect'
+                  ? 'Google takvim izni çalışmadı, takvim uygulaması açıldı: etkinliği orada kaydet. İzni Ayarlar → Google Takvim\'den yeniden bağlayabilirsin.'
+                  : status === 'opened'
+                  ? 'Takvim uygulaması açıldı: etkinliği orada kaydetmeyi unutma.'
+                  : status === 'exists' ? 'Bu etkinlik zaten takvimde.' : 'Takvime eklendi.',
+              );
+            }}
+          />
+        ) : null}
         {replying && detail?.replyTo ? (
           <ReplyComposer
             connection={connection}

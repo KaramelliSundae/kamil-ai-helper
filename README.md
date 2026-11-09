@@ -150,11 +150,17 @@ With Google Tasks connected, a mail or an announcement has **Hatırlatıcı ekle
 first. The chips above the list narrow it by kind or by course and say how many each holds. Opening a notification marks it
 read; the two buttons at the top mark a whole list read or delete what you have read in it. Pull down to check Canvas and mail
 right away. Each notification shows what holds now, not just what was true when it arrived: time left, *Süresi geçti*,
-*Teslim edildi* or the grade. Slide a notification sideways for **Okundu** and **Sil**.
-**Notlar**, the third choice beside Canvas and E-posta, shows Canvas's Grades page as a table, one course at a time: due date,
-when you handed it in, *geç* or *eksik*, and the score. It is read in the same round as everything else, in server mode and
-phone mode alike, and it only displays: a new grade still notifies exactly once, as before, never a second time because of the table. While Kamil answers, the chat shows each
+*Teslim edildi* or the grade. Slide a notification sideways for **Okundu** and **Sil**. While Kamil answers, the chat shows each
 step it is taking.
+
+**Takvime ekle** (on a mail or an announcement) lets Kamil read the text and propose the events that have a day and a time in it. You pick one and
+tap **Ekle**: nothing reaches the calendar before that. Without a Google connection Android's own calendar app opens with the event filled
+in; with one (see [docs/google-tasks.md](docs/google-tasks.md)) it goes straight in.
+
+**Tüm Notlar**, a filter of the Canvas list beside *Not Girildi* (which holds the grade notifications), shows Canvas's Grades page
+as a table, one course at a time: due date, when you handed it in, *geç* or *eksik*, and the score. Every course is in its menu,
+even one with nothing yet. It is read in the same round as everything else, in server mode and phone mode alike, and it only
+displays: a new grade still notifies exactly once, as before, never a second time because of the table.
 
 ## Sharing the GPU
 

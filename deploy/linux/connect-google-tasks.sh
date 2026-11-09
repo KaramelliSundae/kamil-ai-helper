@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Connects Google Tasks once, so the app's "Google Tasks'a ekle" works. Run on the server:
-#   ssh -t you@your-server sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh [client.json]
+#   ssh -t you@your-server sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh [--calendar] [--keep-client | client.json]
+# --keep-client reuses the client ID and secret already stored (no JSON file needed), to add --calendar to a connection that exists.
+# --calendar also lets Kamil add events you approve to Google Calendar (the Calendar API must be enabled in the same project).
 # With the client JSON downloaded from Google Cloud it reads the ID and secret from it and deletes the
 # file afterwards; without it, it asks for both. Then it asks for the address the browser lands on.
 # The result is a refresh token for the tasks scope only, encrypted like the others.
@@ -10,14 +12,34 @@ set -euo pipefail
 # Encrypted to the TPM when the machine has one, otherwise to the host key under /var/lib/systemd.
 # No PCR binding: a firmware update must not lock the server out of its own secrets.
 if [[ -e /dev/tpmrm0 ]]; then key_args=(--with-key=host+tpm2 --tpm2-pcrs=); else key_args=(--with-key=host); fi
-client_file=${1:-}
+calendar_args=()
+client_file=
+keep_client=
+for arg in "$@"; do
+  case $arg in
+    --calendar) calendar_args=(--calendar) ;;
+    --keep-client) keep_client=1 ;;
+    *) client_file=$arg ;;
+  esac
+done
+cred=/etc/ai-ders/creds/google_tasks.cred
+if [[ -n $keep_client ]]; then
+  [[ -z $client_file ]] || { echo "--keep-client and a client file do not go together" >&2; exit 1; }
+  [[ -r $cred ]] || { echo "no connection to take the client from: $cred" >&2; exit 1; }
+  # Only the client ID and secret, as a file only root can read, shredded below like a downloaded one.
+  client_file=$(mktemp)
+  chmod 600 "$client_file"
+  systemd-creds decrypt --name=google_tasks "$cred" - | python3 -c \
+    'import json,sys; d=json.load(sys.stdin); print(json.dumps({"installed": {"client_id": d["client_id"], "client_secret": d["client_secret"]}}))' \
+    > "$client_file" || { shred -u "$client_file"; echo "could not read the stored connection" >&2; exit 1; }
+fi
 if [[ -n $client_file ]]; then
   [[ -f $client_file ]] || { echo "dosya yok: $client_file" >&2; exit 1; }
   # Read by root only while it is needed, then gone, whatever happens.
   trap 'shred -u "$client_file" 2>/dev/null || rm -f "$client_file"' EXIT
-  credentials=$(/opt/ai-ders/.venv/bin/ai-ders google-auth --client-file "$client_file")
+  credentials=$(/opt/ai-ders/.venv/bin/ai-ders google-auth "${calendar_args[@]}" --client-file "$client_file")
 else
-  credentials=$(/opt/ai-ders/.venv/bin/ai-ders google-auth)
+  credentials=$(/opt/ai-ders/.venv/bin/ai-ders google-auth "${calendar_args[@]}")
 fi
 printf '%s' "$credentials" | systemd-creds encrypt --name=google_tasks "${key_args[@]}" - \
   /etc/ai-ders/creds/google_tasks.cred
@@ -30,4 +52,4 @@ printf '[Service]\nLoadCredentialEncrypted=google_tasks:/etc/ai-ders/creds/googl
 command -v restorecon >/dev/null && restorecon -R /etc/systemd/system/ai-ders-api.service.d
 systemctl daemon-reload
 systemctl restart ai-ders-api.service
-echo "Google Tasks bağlandı."
+echo "Google bağlandı${calendar_args:+ (Tasks ve Takvim)}."

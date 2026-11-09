@@ -17,6 +17,7 @@ import type {
   Release,
   Today,
   TaskOption,
+  CalendarOption,
 } from './types';
 import { ApiError } from './types';
 
@@ -166,6 +167,25 @@ export const api = {
   updateDraft: async (c: Connection, draft: Draft, change: { to: string; subject: string; body: string }) => {
     if (c.mode === 'phone') return phoneApi.updateDraft(draft, change);
     await request<Draft>(c, `/v1/drafts/${draft.id}`, 'PUT', { hash: draft.hash, ...change });
+  },
+  /** What the model finds in this mail or announcement worth a calendar entry. Adds nothing. */
+  suggestEvents: (c: Connection, key: string) =>
+    c.mode === 'phone'
+      ? phoneApi.suggestEvents(key)
+      : request<{ events: CalendarOption[] }>(c, '/v1/calendar/suggest', 'POST', { key }),
+  /**
+   * The one event the student picked. 'added': it is in Google Calendar. 'opened': the phone's calendar app opened with the
+   * event filled in, which is what happens with no Google connection (server mode: when the server has none).
+   */
+  addEvent: async (c: Connection, key: string, option: CalendarOption): Promise<{ status: string }> => {
+    if (c.mode === 'phone') return phoneApi.addEvent(key, option);
+    try {
+      return await request<{ status: string }>(c, '/v1/calendar', 'POST', { key, ...option });
+    } catch (reason) {
+      if (!(reason instanceof ApiError) || reason.status !== 409) throw reason;
+      await phoneApi.openInCalendar(option);
+      return { status: 'opened' };
+    }
   },
   suggestTask: (c: Connection, key: string) =>
     c.mode === 'phone'

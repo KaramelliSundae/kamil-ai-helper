@@ -26,7 +26,7 @@ Each provider handles what it receives under its own terms. On Gemini's free tie
 
 ## Google user data
 
-If you choose **Google hesabına bağlan**, Kamil asks for one permission, Google Tasks (`https://www.googleapis.com/auth/tasks`). It does not get access to your Gmail, Drive or Calendar.
+If you choose **Google hesabına bağlan**, Kamil asks for one permission, Google Tasks (`https://www.googleapis.com/auth/tasks`). It does not get access to your Gmail or Drive. Only if you also use **Takvime ekle** with a Google connection does it ask for a second permission, `https://www.googleapis.com/auth/calendar.events`, which can add and change events but does not read your calendar; it adds only the event you picked. Without that permission, Android's own calendar app opens with the event filled in instead.
 
 - Kamil uses this permission only to add the tasks you choose, to change their date when you agree, and to remove them when you ask.
 - It sends your task list to no one. Nothing from Google Tasks goes to an AI provider or to Kamil's authors.

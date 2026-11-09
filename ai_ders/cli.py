@@ -142,9 +142,9 @@ def mode(settings: Settings, args: argparse.Namespace) -> int:
 
 
 def google_auth(settings: Settings, args: argparse.Namespace) -> int:
-    """One-time Google Tasks consent. Prints the credentials JSON for connect-google-tasks.sh to encrypt."""
+    """One-time Google consent (Tasks, and with --calendar also Calendar events). Prints the credentials JSON for connect-google-tasks.sh to encrypt."""
     try:
-        print(gtasks.authorize(client_file=args.client_file))
+        print(gtasks.authorize(client_file=args.client_file, calendar=args.calendar))
     except gtasks.GoogleTasksError as error:
         print(f"hata: {error}", file=sys.stderr)
         return 1
@@ -170,6 +170,7 @@ def main() -> None:
     command.set_defaults(handler=mode)
     google = commands.add_parser("google-auth", help="connect Google Tasks once")
     google.add_argument("--client-file", help="the client JSON downloaded from Google Cloud")
+    google.add_argument("--calendar", action="store_true", help="also allow adding events the student approves to Google Calendar")
     google.set_defaults(handler=google_auth)
 
     args = parser.parse_args()

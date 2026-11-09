@@ -49,11 +49,11 @@ const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
     { id: 'announcement', label: 'Duyuru' },
     { id: 'work', label: 'Ödev' },
     { id: 'exam', label: 'Sınav' },
-    { id: 'grade', label: 'Not' },
+    { id: 'grade', label: 'Not Girildi' },
     { id: 'message', label: 'Mesaj' },
     { id: 'reminder', label: 'Hatırlatma' },
     // Canvas's Grades page as a table, not a kind of notification: it has its own view.
-    { id: 'grades', label: 'Notlar' },
+    { id: 'grades', label: 'Tüm Notlar' },
   ],
   mail: [
     { id: 'unread', label: 'Okunmamış' },

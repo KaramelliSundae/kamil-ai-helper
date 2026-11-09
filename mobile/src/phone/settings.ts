@@ -15,6 +15,7 @@ const KEYS = {
   provider: 'phone.provider',
   baseUrl: 'phone.baseUrl',
   googleConnected: 'phone.googleConnected',
+  calendarStatus: 'phone.calendarStatus',
   syllabusCheckDays: 'phone.syllabusCheckDays',
   mailHost: 'phone.mailHost',
   mailUser: 'phone.mailUser',
@@ -70,6 +71,23 @@ export async function loadGoogleConnected(): Promise<boolean> {
 export async function saveGoogleConnected(connected: boolean): Promise<void> {
   if (connected) await SecureStore.setItemAsync(KEYS.googleConnected, 'yes');
   else await SecureStore.deleteItemAsync(KEYS.googleConnected);
+}
+
+/**
+ * Where the calendar permission stands, apart from Tasks: '' never tried (a student who connected Tasks is tried once, the
+ * first time), 'ok' it worked or was just given, 'failed' Google refused it (not given, or the Calendar API is closed),
+ * 'off' the student switched it off. Only 'ok' and a first try go to Google; otherwise the phone's calendar app opens.
+ */
+export type CalendarStatus = '' | 'ok' | 'failed' | 'off';
+
+export async function loadCalendarStatus(): Promise<CalendarStatus> {
+  const value = await SecureStore.getItemAsync(KEYS.calendarStatus);
+  return value === 'ok' || value === 'failed' || value === 'off' ? value : '';
+}
+
+export async function saveCalendarStatus(status: CalendarStatus): Promise<void> {
+  if (status) await SecureStore.setItemAsync(KEYS.calendarStatus, status);
+  else await SecureStore.deleteItemAsync(KEYS.calendarStatus);
 }
 
 export async function saveSyllabusCheckDays(days: number): Promise<void> {

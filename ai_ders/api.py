@@ -5,6 +5,7 @@ No `from __future__ import annotations` here: FastAPI has to see the route annot
 and `Db` is local to create_app().
 """
 
+import hashlib
 import hmac
 import json
 import os
@@ -23,9 +24,10 @@ from pydantic import BaseModel, Field
 
 from .agent import answer
 from .config import Settings
+from .gcalendar import GoogleCalendar, has_calendar
 from .gtasks import GoogleCredentials, GoogleTasks, GoogleTasksError
 from .llm import PROVIDER_NAMES, GeminiClient, LlmBusy, LlmClient, clean_base_url, cloud_models, gemini_models
-from .suggest import clean_title, suggest_tasks
+from .suggest import clean_event, clean_title, suggest_events, suggest_tasks
 from .exams import CHECK_DAY_CHOICES, DEFAULT_CHECK_DAYS, is_exam_title, quiz_number
 from .mailbox import OUTGOING_PREFIX
 from .mailsend import MailSender, MailSendError, OutgoingMail, recipients
@@ -69,6 +71,14 @@ class TaskRequest(TaskKey):
     # The student's own choice of wording and day, for a mail or an announcement. Without them: the item's own.
     title: str | None = Field(default=None, max_length=300)
     due: date | None = None
+
+
+class CalendarRequest(TaskKey):
+    # What the student picked from the model's proposals. It is cleaned again here: the app is not trusted with a link.
+    title: str = Field(max_length=300)
+    start: str = Field(max_length=32)
+    end: str | None = Field(default=None, max_length=32)
+    location: str | None = Field(default=None, max_length=300)
 
 
 class SendRequest(BaseModel):
@@ -189,6 +199,7 @@ def create_app(
     llm: Any = None,
     send: Any = None,
     tasks: Any = None,
+    calendar: Any = None,
     gemini: Any = None,
     gemini_lister: Any = None,
     cloud_lister: Any = None,
@@ -201,6 +212,10 @@ def create_app(
     send = send or MailSender(settings.mail_sender)
     if tasks is None and settings.google_tasks:
         tasks = GoogleTasks(GoogleCredentials.parse(settings.google_tasks))
+    if calendar is None and settings.google_tasks:
+        credentials = GoogleCredentials.parse(settings.google_tasks)
+        if has_calendar(credentials):
+            calendar = GoogleCalendar(credentials, getattr(settings.timezone, "key", "UTC"))
     injected_gemini = gemini
     list_models = gemini_lister or gemini_models
     list_cloud = cloud_lister or cloud_models
@@ -449,6 +464,53 @@ def create_app(
             raise HTTPException(503, str(busy)) from busy
         return {"options": options}
 
+    @app.post("/v1/calendar/suggest", dependencies=guarded)
+    def suggest_calendar(request: TaskKey, store: Db) -> dict[str, Any]:
+        """Only when the student taps for it, and it adds nothing: the model reads the text and proposes events.
+        It needs no Google connection: without one, the phone opens its own calendar app with the chosen event."""
+        row = store.get_item(request.key)
+        if row is None:
+            raise HTTPException(404, "kayıt bulunamadı")
+        model = llm
+        if model is None:
+            model = current_gemini()
+            if model is None:
+                raise HTTPException(409, "Model bağlı değil")
+            if row["kind"] == "mail" and not mail_to_gemini():
+                raise HTTPException(409, "Mailler Gemini'ye kapalı")
+        today = datetime.now(UTC).astimezone(settings.timezone).date()
+        try:
+            events = suggest_events(model, row["title"], row["course"], row["sender"], row["body"], today)
+        except LlmBusy as busy:
+            raise HTTPException(503, str(busy)) from busy
+        return {"events": events}
+
+    @app.post("/v1/calendar", dependencies=guarded)
+    def add_event(request: CalendarRequest, store: Db) -> dict[str, str]:
+        """Puts the one event the student chose into their Google Calendar, once."""
+        if calendar is None:
+            raise HTTPException(409, "Google Takvim bağlı değil")
+        row = store.get_item(request.key)
+        if row is None:
+            raise HTTPException(404, "kayıt bulunamadı")
+        today = datetime.now(UTC).astimezone(settings.timezone).date()
+        event = clean_event(request.model_dump(), today)
+        if event is None:
+            raise HTTPException(422, "Etkinliğin adı ve günü geçerli olmalı, bağlantı içermemeli")
+        fingerprint = hashlib.sha256(f"{event['title']}|{event['start']}".encode()).hexdigest()[:16]
+        marker = f"gcal:{request.key}:{fingerprint}"
+        if store.get_meta(marker):
+            return {"status": "exists"}
+        origin = f"{row['course']}: {row['title']}" if row["course"] else row["title"]
+        try:
+            event_id = calendar.add(event["title"], event["start"], event["end"], event["location"], f"Kamil: {origin}")
+        except GoogleTasksError as error:
+            raise HTTPException(502, str(error)) from error
+        except httpx.HTTPError as error:
+            raise HTTPException(502, "Google Takvim'e ulaşılamadı") from error
+        store.set_meta(marker, event_id)
+        return {"status": "added"}
+
     @app.post("/v1/tasks/remove", dependencies=guarded)
     def remove_task(request: TaskRequest, store: Db) -> dict[str, str]:
         """Takes out only a task Kamil itself added: the id comes from our record, never from the request."""
@@ -613,7 +675,7 @@ def create_app(
             "models": models,
             "schoolDomain": settings.school_domain,
             "webmailUrl": settings.webmail_url,
-            "features": {"localModel": llm is not None, "gpuGate": bool(gate), "tasks": tasks is not None},
+            "features": {"localModel": llm is not None, "gpuGate": bool(gate), "tasks": tasks is not None, "calendar": calendar is not None},
         }
 
     @app.get("/v1/settings/gemini", dependencies=guarded)

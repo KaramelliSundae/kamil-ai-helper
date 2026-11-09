@@ -55,6 +55,27 @@ sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh /yol/client.json
 
 Betik dosyayı işi bitince siler; izin sunucuda şifreli kimlik bilgisi olarak durur.
 
+## Maildeki etkinlikleri takvime ekleme
+
+Bir mail ya da duyuruda **Takvime ekle**'ye basınca Kamil metni okur ve gün/saati yazılı etkinlikleri önerir (en fazla üç: başlık, gün, saat, yer). Sen birini seçip **Ekle**'ye basmadan hiçbir şey eklenmez; metinde bağlantı olan başlık ve yer önerilmez.
+
+| | Kurulumsuz | Google hesabına bağlı |
+|---|---|---|
+| Nerede | Her modda | Telefon modu; sunucuda kendi istemcinle |
+| Ne olur | Telefonun takvim uygulaması etkinlik hazır doldurulmuş açılır, orada kaydedersin | Doğrudan takvimine eklenir |
+| Kurulum | Yok | Aşağıdaki adımlar |
+
+Google'a bağlıyken bir sorun olursa (izin verilmedi, Calendar API kapalı) Kamil takvim uygulamasını açmaya döner, bu yüzden düğme hep çalışır.
+
+**Doğrudan eklemek için** aynı Google Cloud projesinde:
+
+1. [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) sayfasında **Enable**.
+2. [Data access](https://console.cloud.google.com/auth/scopes) sayfasında `https://www.googleapis.com/auth/calendar.events` kapsamını ekle. Bu kapsam yalnızca etkinlik ekler ve değiştirir; takvimindeki başka bir şeyi okuyup göndermez.
+3. **Telefon modu:** başka bir şey gerekmez. Tasks'ı daha önce bağlayanlarda ilk **Ekle**'ye basınca Google'ın takvim izin ekranı açılır. Hiçbir şey uygulama açılırken denenmez, yalnızca **Ekle**'ye basınca. İzin verilmezse ya da Calendar API kapalıysa etkinlik takvim uygulamasında açılır ve bir daha Google denenmez. İzni sonradan **Ayarlar → Google Takvim** bölümünden, adımları anlatan pencereyle yeniden bağlayabilirsin.
+4. **Sunucu:** bağlantıyı takvim izniyle yeniden kur: `sudo /opt/ai-ders/deploy/linux/connect-google-tasks.sh --calendar /yol/client.json`. `--calendar` olmadan kurulmuş bağlantı yalnızca Tasks'tır ve takvime dokunmaz.
+
+Etkinlik ana takvimine eklenir ve aynı etkinlik iki kez eklenmez. Sonradan silmek istersen Google Takvim'den silersin.
+
 ## Doğrulamayı atlamanın sınırları
 
 Google'ın kurallarına göre:
@@ -66,7 +87,7 @@ Daha çok kullanıcıya açılacaksa Google'ın doğrulama sürecinden geçmek g
 
 ## Gizlilik
 
-- İzin yalnızca görevler içindir (`auth/tasks`); Gmail, Drive veya takvime erişmez.
+- İzin yalnızca görevler içindir (`auth/tasks`); Gmail veya Drive'a erişmez. Takvime ancak sen **Takvime ekle** için ayrıca izin verirsen erişir (`auth/calendar.events`): yalnızca seçtiğin etkinliği ekler, takvimini okumaz.
 - Hatırlatıcı önerisi için duyuru veya mail metni seçtiğin modele gider; mail ancak "Okul maili bulut modele gitsin" açıksa gider.
 - Tasks'a yalnızca seçtiğin görev metni, kaynak başlığı ve varsa Canvas bağlantısı yazılır.
 - İstediğin zaman iptal edebilirsin: Kamil'de **Bağlantıyı kaldır** ve [Google hesap izinleri](https://myaccount.google.com/permissions).

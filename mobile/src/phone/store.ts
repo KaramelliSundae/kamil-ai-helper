@@ -94,6 +94,8 @@ export type PhoneState = {
     nextReminderId?: number;
     /** Tasks added to Google Tasks. `due` is null for a day the student chose, which is never followed. */
     gtasks?: Record<string, { id: string; due: string | null }>;
+    /** Calendar events added to Google Calendar, by item key and event, so one is never added twice. */
+    gcal?: Record<string, string>;
     /** The limit a model's own 429 named. */
     quotaSeen?: Record<string, string>;
     digestDay?: string;

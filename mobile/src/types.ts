@@ -63,6 +63,8 @@ export type Exam = {
 };
 /** A task the model proposes from an announcement or a mail. Nothing is added until the student picks it. */
 export type TaskOption = { title: string; due: string | null };
+/** An event the model proposes from a mail. `start` is a day, or a day and time (2026-11-14T14:00): then it has an hour. */
+export type CalendarOption = { title: string; start: string; end: string | null; location: string | null };
 export type Today = {
   upcoming: Upcoming[];
   pendingDrafts: number;
@@ -108,7 +110,7 @@ export type ChatSetup = {
   /** Newer servers and the phone backend: what this setup offers. */
   schoolDomain?: string;
   webmailUrl?: string;
-  features?: { localModel: boolean; gpuGate: boolean; tasks: boolean };
+  features?: { localModel: boolean; gpuGate: boolean; tasks: boolean; calendar?: boolean };
 };
 export type GeminiSettings = { connected: boolean; source: 'server' | 'app' | null; model: string; mailAllowed: boolean; provider?: 'gemini' | 'openrouter' | 'custom'; baseUrl?: string };
 export type Conversation = { id: number; title: string; updatedAt: string };
