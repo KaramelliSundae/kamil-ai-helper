@@ -22,14 +22,18 @@ BULK_SENDER = re.compile(r"no-?reply|newsletter|b[üu]lten|mailer-daemon")
 BULK_HEADERS = ("list-unsubscribe", "list-id")
 
 
+def is_bulk_mail(sender: str, headers: dict[str, str]) -> bool:
+    precedence = headers.get("precedence", "").lower()
+    is_bulk = any(name in headers for name in BULK_HEADERS) or precedence in ("bulk", "list", "junk")
+    return is_bulk or "auto-submitted" in headers or bool(BULK_SENDER.search(normalize_tr(sender)))
+
+
 def mail_level(sender: str, subject: str, body: str, headers: dict[str, str]) -> str:
-    sender = normalize_tr(sender)
-    if CANVAS_SENDER.search(sender):
+    normalized = normalize_tr(sender)
+    if CANVAS_SENDER.search(normalized):
         return LOW  # the same news already arrives from the Canvas API
     if URGENT.search(normalize_tr(f"{subject}\n{body[:2000]}")):
         return HIGH
-    precedence = headers.get("precedence", "").lower()
-    is_bulk = any(name in headers for name in BULK_HEADERS) or precedence in ("bulk", "list", "junk")
-    if is_bulk or "auto-submitted" in headers or BULK_SENDER.search(sender):
+    if is_bulk_mail(sender, headers):
         return LOW
     return NORMAL

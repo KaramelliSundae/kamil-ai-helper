@@ -28,6 +28,12 @@ export type StoredItem = {
   replyTo?: string;
   messageId?: string;
   references?: string;
+  /** Mail only: a mailing-list/auto-submitted header, or a no-reply-style sender. */
+  bulk?: boolean;
+  /** Mail only: how likely this looks like spam or phishing, and why — cheap heuristics, refined on demand. */
+  spamScore?: number;
+  spamReasons?: string[];
+  spamChecked?: boolean;
   firstSeen: string;
   lastSeen: string;
 };
@@ -48,7 +54,7 @@ export type StoredDraft = {
   references?: string;
 };
 
-export type StoredExam = FoundExam & { course: string };
+export type StoredExam = FoundExam & { course: string; note: string; notePostedAt: string; noteUrl: string };
 
 export type PhoneState = {
   version: 1;

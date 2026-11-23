@@ -7,10 +7,12 @@ import * as Notifications from 'expo-notifications';
 
 import type { EventItem } from '../types';
 import type { GradeCourse } from '../types';
+import { splitSender } from '../mailText';
 import { activeCourses, CanvasAuthError, CanvasItem, fetchCanvas } from './canvas';
-import { bestExams, CourseScan, examsInItems, FoundExam, scanCourse, ScanLater, TRUST } from './exams';
+import { bestExams, CourseScan, ExamNote, examsInItems, FoundExam, notesInItems, scanCourse, ScanLater, TRUST } from './exams';
 import { ImapAuthError, MailItem, mailProblem, readNewMail, readSentMail } from './mail';
 import { loadMailSettings, loadPhoneSettings, PhoneSettings } from './settings';
+import { scoreMail } from './spam';
 import { PhoneState, readState, StoredItem, updateState } from './store';
 import { fingerprint, shorten } from './text';
 
@@ -204,7 +206,13 @@ function recordExams(state: PhoneState, course: string, found: FoundExam[], now:
     const old = state.exams[key];
     if (old && TRUST[old.status] > TRUST[exam.status]) continue;
     if (old && old.startsOn === exam.startsOn && old.status === exam.status) continue;
-    state.exams[key] = { ...exam, course };
+    // A side note ("this may still change") stays only while it is newer than the answer it is a note about; a
+    // firmer date that comes after it resolves the doubt, so the note is dropped rather than carried forward.
+    const keepNote = !!(old?.notePostedAt && (!exam.postedAt || exam.postedAt < old.notePostedAt));
+    state.exams[key] = {
+      ...exam, course,
+      note: keepNote ? old!.note : '', notePostedAt: keepNote ? old!.notePostedAt : '', noteUrl: keepNote ? old!.noteUrl : '',
+    };
     const inTasks = !!state.meta.gtasks?.[key];
     // Any date is worth a word once it is in the student's Tasks, however unsure it is.
     // A quiz's announcement was a notification of its own already; its row only speaks up for a task it moved.
@@ -219,6 +227,18 @@ function recordExams(state: PhoneState, course: string, found: FoundExam[], now:
   }
 }
 
+/** A note about an exam whose date may still change: kept only on top of an exam that is already known, and only
+ * while it says something newer than both the stored date and any note already there. */
+function recordExamNotes(state: PhoneState, course: string, notes: ExamNote[]): void {
+  state.exams ??= {};
+  for (const note of notes) {
+    const key = `exam:${course}:${note.kind}:${note.number}`;
+    const old = state.exams[key];
+    if (!old || !note.postedAt || note.postedAt <= (old.postedAt ?? '') || (old.notePostedAt && note.postedAt <= old.notePostedAt)) continue;
+    state.exams[key] = { ...old, note: note.text, notePostedAt: note.postedAt, noteUrl: note.url };
+  }
+}
+
 /** What announcements say, every round. Quick: nothing here calls a model. */
 async function examsFromItems(items: CanvasItem[], now: Date): Promise<void> {
   const known = (await readState()).examCourses ?? {};
@@ -227,9 +247,11 @@ async function examsFromItems(items: CanvasItem[], now: Date): Promise<void> {
     if (row.termStart) starts[row.course] = new Date(`${row.termStart}T00:00:00`);
   }
   const fromItems = examsInItems(items, now, starts);
+  const notesFromItems = notesInItems(items);
   await updateState((state) => {
     const quiet = !state.meta.examsBaselineAt;
     for (const [course, found] of Object.entries(fromItems)) recordExams(state, course, bestExams(found, now), now, quiet);
+    for (const [course, notes] of Object.entries(notesFromItems)) recordExamNotes(state, course, notes);
   });
 }
 
@@ -382,9 +404,21 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
       }
     } else if (mail) {
       const firstRun = !state.meta.mailWindowRead; // the last days are read quietly, so a new account does not ring for all of them
+      // Off by the student's own word (Settings > spam filter) means off entirely: nothing here is even scored.
+      const spamOn = settings.spamFilterEnabled;
+      const knownSenders = spamOn
+        ? new Set(
+            Object.values(state.items).filter((i) => i.kind === 'mail').map((i) => splitSender(i.sender).address.toLowerCase()).filter(Boolean),
+          )
+        : new Set<string>();
       for (const item of mail.items) {
         for (const change of upsert(state, item, stamp)) {
           if (!firstRun) recordChange(state, item, change, now);
+        }
+        if (spamOn) {
+          const result = scoreMail(item.sender, item.title, item.body, !!item.messageId, item.bulk, state.meta.schoolDomain ?? '', knownSenders);
+          state.items[item.key].spamScore = result.score;
+          state.items[item.key].spamReasons = result.reasons;
         }
       }
       state.meta.mailCursor = mail.cursor;

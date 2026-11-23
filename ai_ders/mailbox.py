@@ -20,7 +20,7 @@ from imap_tools import AND, MailBox, U
 from .mailparse import MAX_INPUT_BYTES, MailParseError, ParsedMail, Parser
 from .mailthread import find_sent_folder, first_message_id, thread_of
 from .models import NORMAL, Item
-from .rules import mail_level
+from .rules import is_bulk_mail, mail_level
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ def mail_item(parsed: ParsedMail, uid: int, uidvalidity: int, now: datetime) -> 
         reply_to=parsed.from_,
         message_id=first_message_id(parsed.headers.get("message-id")),
         references=parsed.headers.get("references", ""),
+        bulk=is_bulk_mail(parsed.from_, parsed.headers),
     )
 
 

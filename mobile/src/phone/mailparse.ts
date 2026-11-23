@@ -48,12 +48,17 @@ const URGENT = new RegExp(
 const CANVAS_SENDER = /instructure|canvas/;
 const BULK_SENDER = /no-?reply|newsletter|b[üu]lten|mailer-daemon/;
 
+/** A mailing-list/auto-submitted header, or a no-reply-style sender: the same rule as ai_ders/rules.py's `is_bulk_mail`. */
+export function isBulkMail(mail: ParsedMail): boolean {
+  const precedence = (mail.headers.precedence ?? '').toLowerCase();
+  const bulk = 'list-unsubscribe' in mail.headers || 'list-id' in mail.headers || ['bulk', 'list', 'junk'].includes(precedence);
+  return bulk || 'auto-submitted' in mail.headers || BULK_SENDER.test(normalizeTr(mail.from));
+}
+
 /** Mail importance without a model. Nothing is dropped: mail that is not urgent waits in the list, without a notification. */
 export function mailLevel(mail: ParsedMail): string {
   const sender = normalizeTr(mail.from);
   if (CANVAS_SENDER.test(sender)) return 'low'; // the same news already arrives from Canvas
   if (URGENT.test(normalizeTr(`${mail.subject}\n${mail.body.slice(0, 2000)}`))) return 'high';
-  const precedence = (mail.headers.precedence ?? '').toLowerCase();
-  const bulk = 'list-unsubscribe' in mail.headers || 'list-id' in mail.headers || ['bulk', 'list', 'junk'].includes(precedence);
-  return bulk || 'auto-submitted' in mail.headers || BULK_SENDER.test(sender) ? 'low' : 'normal';
+  return isBulkMail(mail) ? 'low' : 'normal';
 }

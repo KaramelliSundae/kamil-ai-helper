@@ -417,7 +417,7 @@ export function TodayScreen({ connection, onOpenDrafts }: {
           target={{
             key: openExam.key,
             title: `${openExam.course}: ${examName(openExam)}`,
-            body: `${examWhen(openExam)}\n${EXAM_STATUS[openExam.status]}${openExam.evidence ? `\n\n${openExam.evidence}` : ''}`,
+            body: `${examWhen(openExam)}\n${EXAM_STATUS[openExam.status]}${openExam.evidence ? `\n\n${openExam.evidence}` : ''}${openExam.note ? `\n\nNot: Tarih henüz kesinleşmedi — ${openExam.note}` : ''}`,
             url: openExam.url,
           }}
           onClose={() => setOpenExam(null)}

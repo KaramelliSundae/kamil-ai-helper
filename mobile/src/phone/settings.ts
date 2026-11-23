@@ -17,6 +17,7 @@ const KEYS = {
   googleConnected: 'phone.googleConnected',
   calendarStatus: 'phone.calendarStatus',
   syllabusCheckDays: 'phone.syllabusCheckDays',
+  spamFilterEnabled: 'phone.spamFilterEnabled',
   mailHost: 'phone.mailHost',
   mailUser: 'phone.mailUser',
   mailPassword: 'phone.mailPassword',
@@ -26,10 +27,13 @@ const KEYS = {
 /** Every file read is one Gemini request, so by default a course with no syllabus yet is looked at once a week. */
 export const DEFAULT_SYLLABUS_CHECK_DAYS = 7;
 
-export type PhoneSettings = { canvasUrl: string; canvasToken: string; provider: Provider; baseUrl: string; geminiKey: string; geminiModel: string; syllabusCheckDays: number };
+export type PhoneSettings = {
+  canvasUrl: string; canvasToken: string; provider: Provider; baseUrl: string; geminiKey: string; geminiModel: string;
+  syllabusCheckDays: number; spamFilterEnabled: boolean;
+};
 
 export async function loadPhoneSettings(): Promise<PhoneSettings> {
-  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays, provider, baseUrl] = await Promise.all([
+  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays, provider, baseUrl, spamFilterEnabled] = await Promise.all([
     SecureStore.getItemAsync(KEYS.canvasUrl),
     SecureStore.getItemAsync(KEYS.canvasToken),
     SecureStore.getItemAsync(KEYS.geminiKey),
@@ -37,6 +41,7 @@ export async function loadPhoneSettings(): Promise<PhoneSettings> {
     SecureStore.getItemAsync(KEYS.syllabusCheckDays),
     SecureStore.getItemAsync(KEYS.provider),
     SecureStore.getItemAsync(KEYS.baseUrl),
+    SecureStore.getItemAsync(KEYS.spamFilterEnabled),
   ]);
   return {
     provider: (provider as Provider | null) ?? 'gemini',
@@ -46,10 +51,15 @@ export async function loadPhoneSettings(): Promise<PhoneSettings> {
     geminiKey: geminiKey ?? '',
     geminiModel: geminiModel || DEFAULT_GEMINI_MODEL,
     syllabusCheckDays: syllabusCheckDays === null ? DEFAULT_SYLLABUS_CHECK_DAYS : Number(syllabusCheckDays),
+    spamFilterEnabled: spamFilterEnabled !== '0',
   };
 }
 
-export async function savePhoneSettings(settings: Omit<PhoneSettings, 'syllabusCheckDays'>): Promise<void> {
+export async function saveSpamFilterEnabled(enabled: boolean): Promise<void> {
+  await SecureStore.setItemAsync(KEYS.spamFilterEnabled, enabled ? '1' : '0');
+}
+
+export async function savePhoneSettings(settings: Omit<PhoneSettings, 'syllabusCheckDays' | 'spamFilterEnabled'>): Promise<void> {
   await SecureStore.setItemAsync(KEYS.canvasUrl, settings.canvasUrl);
   await SecureStore.setItemAsync(KEYS.canvasToken, settings.canvasToken);
   await SecureStore.setItemAsync(KEYS.geminiKey, settings.geminiKey);

@@ -59,6 +59,9 @@ export type Exam = {
   source: string;
   evidence: string;
   url: string;
+  /** A later announcement saying this date may still change — never the date itself, only a quote to show alongside it. */
+  note?: string | null;
+  noteUrl?: string | null;
   inTasks?: boolean;
 };
 /** A task the model proposes from an announcement or a mail. Nothing is added until the student picks it. */
@@ -100,6 +103,8 @@ export type ItemDetail = {
   replyTo?: string;
   /** Older servers send none. `image` is the hash of a JPEG the server's sandbox re-encoded. */
   attachments?: Attachment[];
+  /** Mail: the cheap heuristic tier flagged it as likely spam/phishing. Refine with `api.spamCheck`. */
+  spam?: { reasons: string[] } | null;
 };
 export type Attachment = { name: string; type: string; size: number; image: string | null; width: number; height: number };
 export type ModelId = 'local' | 'gemini';
@@ -136,6 +141,8 @@ export type EventItem = {
   /** Mail: it has attachments, and it came from the school's domain. */
   hasFiles?: boolean;
   fromSchool?: boolean;
+  /** Mail: the cheap heuristic tier flagged it as likely spam/phishing. Refine with `api.spamCheck`. */
+  spam?: { reasons: string[] } | null;
   /** On a conversation's row: all its events, oldest first. */
   threadEvents?: EventItem[];
   /** Phone mode: already announced by an exact alarm, so the event list shows it without notifying again. */

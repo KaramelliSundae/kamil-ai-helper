@@ -3,14 +3,14 @@ import { countInbox, readMail } from '../../modules/mail-socket';
 import type { CanvasItem } from './canvas';
 import { ImapAuthError, ImapError, MailCursor } from './imap';
 import { OUTGOING_KEY, threadOf } from '../mailThread';
-import { mailLevel, parseMail } from './mailparse';
+import { isBulkMail, mailLevel, parseMail } from './mailparse';
 import { clearMailSettings, MailSettings } from './settings';
 import { updateState } from './store';
 
 const DEFAULT_PORT = 993; // TLS from the first byte: there is no plain connection here at all
 const FIRST_RUN_DAYS = 14;
 
-export type MailItem = CanvasItem & { level: string; thread: string; replyTo: string; messageId: string; references: string };
+export type MailItem = CanvasItem & { level: string; thread: string; replyTo: string; messageId: string; references: string; bulk: boolean };
 export { ImapAuthError };
 
 /** "posta.uni.edu" or "posta.uni.edu:993", or null when it is not a bare server name. */
@@ -72,6 +72,7 @@ export async function readNewMail(
       replyTo: mail.from,
       messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
       references: mail.headers.references ?? '',
+      bulk: isBulkMail(mail),
     };
   });
   return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
@@ -105,6 +106,7 @@ export async function readSentMail(settings: MailSettings, cursor: MailCursor | 
       replyTo: raw.to ?? '',
       messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
       references: mail.headers.references ?? '',
+      bulk: false, // the student's own mail is never scored
     };
   });
   return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };

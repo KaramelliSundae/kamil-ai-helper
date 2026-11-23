@@ -605,6 +605,40 @@ function SyllabusCheckPanel({ connection }: { connection: Connection }) {
   );
 }
 
+/** Cheap heuristics, a model only above a threshold: never a hard keyword trigger. A switch to turn it off
+ * entirely, in case it ever gets something wrong. */
+function SpamFilterPanel({ connection }: { connection: Connection }) {
+  const colors = useMaterialColors();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.spamFilterSetting(connection).then((reply) => { if (live) setEnabled(reply.enabled); }, () => undefined);
+    return () => { live = false; };
+  }, [connection]);
+  if (enabled === null) return null; // an older server has no such setting
+  return (
+    <Panel>
+      <SectionTitle icon={icons.error} title="Spam filtresi" />
+      <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+        <Column modifiers={[weight(1)]}>
+          <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+            Mailler oltalama (phishing) belirtisi taşıyıp taşımadığına bakılarak taranır: tek bir kelime değil,
+            birkaç şüpheli belirtinin birlikte görülmesi gerekir. Şüpheli bulunan mailde bağlantı 15 saniye
+            açılmaz. Hiçbir bağlantı tıklanmaz ya da sunucudan getirilmez; yalnızca metin okunur.
+          </Text>
+        </Column>
+        <Switch
+          value={enabled}
+          onCheckedChange={(on) => {
+            setEnabled(on);
+            void api.setSpamFilterSetting(connection, on).catch(() => undefined);
+          }}
+        />
+      </Row>
+    </Panel>
+  );
+}
+
 export function SettingsScreen({ connection, onSaved }: Props) {
   const colors = useMaterialColors();
   const [mode, setMode] = useState<'phone' | 'server'>(connection?.mode ?? 'phone');
@@ -659,6 +693,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
       </Panel>
 
       {connection ? <SyllabusCheckPanel connection={connection} /> : null}
+      {connection ? <SpamFilterPanel connection={connection} /> : null}
       <UpdatePanel connection={connection} />
     </Column>
   );

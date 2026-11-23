@@ -33,6 +33,7 @@ from .mailbox import OUTGOING_PREFIX
 from .mailsend import MailSender, MailSendError, OutgoingMail, recipients
 from .mailthread import plain_subject, reply_references, reply_subject
 from .models import NORMAL, Item
+from . import spam
 from .reply import write_reply
 from .store import draft_hash, event_source, Store, to_time
 from .tools import MAIL_TOOLS, Tools, is_school_address
@@ -111,6 +112,14 @@ class SyllabusCheckRequest(BaseModel):
     days: int
 
 
+class SpamFilterRequest(BaseModel):
+    enabled: bool
+
+
+class SpamCheckRequest(TaskKey):
+    pass
+
+
 class ReadRequest(BaseModel):
     read: bool = True
 
@@ -159,6 +168,9 @@ def event_json(row: Any, item: Any = None, school_domain: str = "") -> dict[str,
         "outgoing": is_outgoing(row["item_key"]),
         "hasFiles": bool(Store.attachments(item)) if mail else False,
         "fromSchool": bool(mail and item["reply_to"] and is_school_address(item["reply_to"], school_domain)),
+        "spam": (
+            {"reasons": json.loads(item["spam_reasons"])} if mail and item["spam_score"] >= spam.THRESHOLD else None
+        ),
         "current": {
             "title": item["title"], "course": item["course"], "dueAt": item["due_at"],
             "submitted": bool(item["submitted"]), "grade": item["grade"], "postedAt": item["posted_at"],
@@ -171,6 +183,7 @@ def exam_json(row: Any) -> dict[str, Any]:
         "key": f"exam:{row['course']}:{row['kind']}:{row['number']}", "course": row["course"], "kind": row["kind"],
         "number": row["number"], "startsOn": row["starts_on"], "endsOn": row["ends_on"], "status": row["status"],
         "week": row["week"], "source": row["source"], "evidence": row["evidence"], "url": row["url"],
+        "note": row["note"] or None, "noteUrl": row["note_url"] or None,
     }
 
 
@@ -347,6 +360,34 @@ def create_app(
             raise HTTPException(400, "geçersiz seçenek")
         store.set_meta("syllabus_check_days", str(request.days))
         return {"days": request.days}
+
+    @app.get("/v1/settings/spam-filter", dependencies=guarded)
+    def spam_filter_setting(store: Db) -> dict[str, bool]:
+        return {"enabled": store.get_meta("spam_filter_enabled") != "0"}
+
+    @app.post("/v1/settings/spam-filter", dependencies=guarded)
+    def set_spam_filter(request: SpamFilterRequest, store: Db) -> dict[str, bool]:
+        store.set_meta("spam_filter_enabled", "1" if request.enabled else "0")
+        return {"enabled": request.enabled}
+
+    @app.post("/v1/mail/spam-check", dependencies=guarded)
+    def spam_check(request: SpamCheckRequest, store: Db) -> dict[str, Any]:
+        """The model-assisted tier: on demand only, when the student opens a mail the cheap tier already flagged,
+        never in the background poll. Costs nothing for mail the cheap tier left alone."""
+        row = store.get_item(request.key)
+        if row is None or row["kind"] != "mail":
+            raise HTTPException(404, "mail bulunamadı")
+        if row["spam_checked"]:
+            return {"score": row["spam_score"], "reasons": json.loads(row["spam_reasons"])}
+        if row["spam_score"] < spam.THRESHOLD:
+            return {"score": row["spam_score"], "reasons": json.loads(row["spam_reasons"])}
+        model = llm or current_gemini()
+        if model is None:
+            return {"score": row["spam_score"], "reasons": json.loads(row["spam_reasons"])}
+        cheap = spam.SpamResult(row["spam_score"], tuple(json.loads(row["spam_reasons"])))
+        result = spam.refine_with_model(model, row["sender"], row["title"], row["body"], cheap)
+        store.set_spam(request.key, result.score, result.reasons, checked=True)
+        return {"score": result.score, "reasons": list(result.reasons)}
 
     @app.post("/v1/tasks", dependencies=guarded)
     def add_task(request: TaskRequest, store: Db) -> dict[str, str]:
@@ -595,6 +636,9 @@ def create_app(
                 {"name": a.name, "type": a.type, "size": a.size, "image": a.image, "width": a.width, "height": a.height}
                 for a in Store.attachments(row)
             ],
+            "spam": (
+                {"reasons": json.loads(row["spam_reasons"])} if row["kind"] == "mail" and row["spam_score"] >= spam.THRESHOLD else None
+            ),
         }
 
     @app.get("/v1/images/{image_id}", dependencies=guarded)

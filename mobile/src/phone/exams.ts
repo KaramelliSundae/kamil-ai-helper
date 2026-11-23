@@ -26,7 +26,11 @@ export type FoundExam = {
   source: string;
   evidence: string;
   url: string;
+  postedAt: string | null; // when the announcement itself went up, to break ties between two announced dates
 };
+/** An announcement that names an exam but says its date is not settled — kept beside the exam, never used to set or
+ * move it, and shown to the student only until a firmer answer comes after it. */
+export type ExamNote = { kind: 'midterm' | 'final'; number: number; text: string; postedAt: string | null; url: string };
 
 export const TRUST: Record<ExamStatus, number> = { estimated: 1, syllabus: 2, announced: 3 };
 const MIN_SYLLABUS_CHARS = 200;
@@ -47,6 +51,9 @@ const keyword = () => new RegExp(`(?<![${WORD}])(?:(${MIDTERM})|(${FINAL}))(?![$
 const QUIZ = 'quiz|k[ıi]sa\\s*s[ıi]nav';
 const withQuiz = () => new RegExp(`(?<![${WORD}])(?:(${MIDTERM})|(${FINAL})|(${QUIZ}))(?![${WORD}])`, 'gi');
 const NOT_A_DATE = /sonu[çc]|result|grade|graded|notu|notlar|weight|%|y[üu]zde|percent|proje|project|report|rapor|paper|essay|presentation|sunum|[öo]dev|homework|assignment|submission|submit|teslim|deliverable|draft|b[üu]t[üu]nleme|makeup|make-up|mazeret|review session|tekrar dersi/i;
+// An exam mentioned alongside words that say its date is not settled yet: a thing to mention, never a thing to set the date to.
+const UNCERTAIN =
+  /consider(?:ing)?|may\s+(?:be|change|move)|might\s+(?:be|change|move)|possibly|tentative(?:ly)?|subject\s+to\s+change|not\s+yet\s+(?:confirmed|final|certain|decided)|to\s+be\s+(?:confirmed|decided|announced)|deadline\s+for\s+comments|please\s+comment|kesinle[şs]medi|de[ğg]i[şs]ebilir|d[üu]ş[üu]n[üu]yoruz|olas[ıi]|netle[şs]medi/i;
 
 const MONTHS: Record<string, number> = {
   ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5, haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9,
@@ -179,7 +186,10 @@ function chunksOf(text: string): string[] {
 }
 
 /** With `quizzes`, quizzes too, but only with a date: a quiz "in week 5" is too loose to be worth a row. */
-export function findExams(text: string, today: Date, termStart: Date | null, datedStatus: ExamStatus, source: string, url = '', quizzes = false): FoundExam[] {
+export function findExams(
+  text: string, today: Date, termStart: Date | null, datedStatus: ExamStatus, source: string, url = '', quizzes = false,
+  postedAt: string | null = null,
+): FoundExam[] {
   const pattern = quizzes ? withQuiz : keyword;
   const found: FoundExam[] = [];
   const chunks = chunksOf(text);
@@ -202,7 +212,7 @@ export function findExams(text: string, today: Date, termStart: Date | null, dat
       let when = findDate(part, today);
       if (!when && index + 1 < chunks.length && chunk.length <= 24 && !pattern().test(chunks[index + 1])) when = findDate(chunks[index + 1].slice(0, 20), today);
       if (when) {
-        found.push({ kind, number, startsOn: iso(when), endsOn: null, status: datedStatus, week: null, source, evidence, url });
+        found.push({ kind, number, startsOn: iso(when), endsOn: null, status: datedStatus, week: null, source, evidence, url, postedAt });
         return;
       }
       if (kind === 'quiz') return;
@@ -216,7 +226,7 @@ export function findExams(text: string, today: Date, termStart: Date | null, dat
         const base = monday(termStart ?? termStartGuess(today));
         found.push({
           kind, number, startsOn: iso(addDays(base, (weeks[0] - 1) * 7)), endsOn: iso(addDays(base, (weeks[1] - 1) * 7 + 4)),
-          status: 'estimated', week: weeks[0], source, evidence, url,
+          status: 'estimated', week: weeks[0], source, evidence, url, postedAt,
         });
       }
     });
@@ -224,13 +234,33 @@ export function findExams(text: string, today: Date, termStart: Date | null, dat
   return found;
 }
 
+/** An announcement that names an exam somewhere and, somewhere else in the same announcement, says its date is not
+ * settled yet ("we are considering Thursday or Friday", "kesinleşmedi"): the keyword and the uncertain wording are
+ * often in different sentences, so this looks at the whole text rather than `findExams`'s narrower per-date window.
+ * Never produces a date — only a quote worth showing the student alongside the exam. */
+export function findNote(text: string, url: string, postedAt: string | null): ExamNote[] {
+  const match = [...text.matchAll(keyword())][0];
+  if (!match) return [];
+  const quote = chunksOf(text).find((chunk) => UNCERTAIN.test(chunk));
+  if (!quote) return [];
+  const start = match.index ?? 0;
+  const kind = match[1] ? 'midterm' : 'final';
+  const number = examNumber(text, start, start + match[0].length);
+  return [{ kind, number, text: quote.slice(0, MAX_EVIDENCE_CHARS), postedAt, url }];
+}
+
 export function bestExams(found: FoundExam[], today: Date): FoundExam[] {
+  // Among equally trusted dates (two announced dates: the original and a postponement), the one announced more recently
+  // wins; a date with no `postedAt` (syllabus, file, canvas due date) ranks behind any that has one.
   const distance = (exam: FoundExam) => Math.abs(new Date(`${exam.startsOn}T00:00:00`).getTime() - today.getTime());
+  const posted = (exam: FoundExam) => (exam.postedAt ? new Date(exam.postedAt).getTime() : -Infinity);
   const chosen = new Map<string, FoundExam>();
   for (const exam of found) {
     const key = `${exam.kind}:${exam.number}`;
     const old = chosen.get(key);
-    if (!old || TRUST[exam.status] > TRUST[old.status] || (TRUST[exam.status] === TRUST[old.status] && distance(exam) < distance(old))) chosen.set(key, exam);
+    const better = !old || TRUST[exam.status] > TRUST[old.status] || (TRUST[exam.status] === TRUST[old.status] &&
+      (posted(exam) > posted(old) || (posted(exam) === posted(old) && distance(exam) < distance(old))));
+    if (better) chosen.set(key, exam);
   }
   for (const kind of ['midterm', 'final']) {
     const plain = chosen.get(`${kind}:0`);
@@ -258,7 +288,7 @@ export function examsInItems(items: CanvasItem[], today: Date, termStarts: Recor
     if (!item.course) continue;
     let found: FoundExam[] = [];
     if (item.kind === 'announcement') {
-      found = findExams(`${item.title}\n${item.body}`, today, termStarts[item.course] ?? null, 'announced', 'announcement', item.url, true);
+      found = findExams(`${item.title}\n${item.body}`, today, termStarts[item.course] ?? null, 'announced', 'announcement', item.url, true, item.postedAt);
     } else if (['assignment', 'quiz', 'event'].includes(item.kind) && item.dueAt && !NOT_A_DATE.test(item.title)) {
       const match = [...item.title.matchAll(keyword())][0];
       if (match) {
@@ -266,10 +296,23 @@ export function examsInItems(items: CanvasItem[], today: Date, termStarts: Recor
         found = [{
           kind: match[1] ? 'midterm' : 'final', number: examNumber(item.title, start, start + match[0].length), startsOn: iso(new Date(item.dueAt)),
           endsOn: null, status: 'announced', week: null, source: 'canvas', evidence: item.title.slice(0, MAX_EVIDENCE_CHARS), url: item.url,
+          postedAt: item.postedAt,
         }];
       }
     }
     if (found.length) (byCourse[item.course] ??= []).push(...found);
+  }
+  return byCourse;
+}
+
+/** Announcements that mention an exam but say its date may still change. Separate from `examsInItems`: these never
+ * set or move a date, so a quiz or an unrelated announcement can never change a midterm's date through this. */
+export function notesInItems(items: CanvasItem[]): Record<string, ExamNote[]> {
+  const byCourse: Record<string, ExamNote[]> = {};
+  for (const item of items) {
+    if (!item.course || item.kind !== 'announcement') continue;
+    const notes = findNote(`${item.title}\n${item.body}`, item.url, item.postedAt);
+    if (notes.length) (byCourse[item.course] ??= []).push(...notes);
   }
   return byCourse;
 }

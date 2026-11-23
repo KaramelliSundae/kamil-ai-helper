@@ -47,3 +47,4 @@ class Item:
     reply_to: str = ""
     message_id: str = ""
     references: str = ""
+    bulk: bool = False  # mail only: a mailing-list/auto-submitted header, or a no-reply-style sender

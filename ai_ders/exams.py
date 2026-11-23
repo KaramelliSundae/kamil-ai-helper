@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -52,6 +52,13 @@ NOT_A_DATE = re.compile(
     re.IGNORECASE,
 )
 PROJECT_LIKE = NOT_A_DATE
+# An exam mentioned alongside words that say its date is not settled yet: a thing to mention, never a thing to set the date to.
+UNCERTAIN = re.compile(
+    r"consider(?:ing)?|may\s+(?:be|change|move)|might\s+(?:be|change|move)|possibly|tentative(?:ly)?|subject\s+to\s+change|"
+    r"not\s+yet\s+(?:confirmed|final|certain|decided)|to\s+be\s+(?:confirmed|decided|announced)|deadline\s+for\s+comments|"
+    r"please\s+comment|kesinle[şs]medi|de[ğg]i[şs]ebilir|d[üu]ş[üu]n[üu]yoruz|olas[ıi]|netle[şs]medi",
+    re.IGNORECASE,
+)
 
 MONTHS = {
     "ocak": 1, "şubat": 2, "subat": 2, "mart": 3, "nisan": 4, "mayıs": 5, "mayis": 5, "haziran": 6, "temmuz": 7, "ağustos": 8,
@@ -99,6 +106,19 @@ class Found:
     week: int | None
     source: str  # announcement | canvas | syllabus | file | onedrive
     evidence: str
+    url: str = ""
+    posted_at: datetime | None = None  # when the announcement itself went up, to break ties between two ANNOUNCED dates
+
+
+@dataclass(frozen=True)
+class Note:
+    """An announcement that mentions an exam but says its date is not settled — kept beside the exam, never used to
+    set or move it, and shown to the student only until a firmer answer comes after it."""
+
+    kind: str
+    number: int
+    text: str
+    posted_at: datetime | None
     url: str = ""
 
 
@@ -198,6 +218,7 @@ def _chunks(text: str) -> list[str]:
 
 def find_exams(
     text: str, today: date, term_start: date | None, dated_status: str, source: str, url: str = "", quizzes: bool = False,
+    posted_at: datetime | None = None,
 ) -> list[Found]:
     """Every exam the text gives a time for. `dated_status` is how far a date in this kind of text can be trusted. With
     `quizzes`, quizzes too, but only with a date: a quiz "in week 5" is too loose to be worth a row."""
@@ -225,7 +246,7 @@ def find_exams(
             if when is None and len(chunks) > index + 1 and len(chunk) <= 24 and not pattern.search(chunks[index + 1]):
                 when = find_date(chunks[index + 1][:20], today)
             if when:
-                found.append(Found(kind, number, when, None, dated_status, None, source, evidence, url))
+                found.append(Found(kind, number, when, None, dated_status, None, source, evidence, url, posted_at))
                 continue
             if kind == "quiz":
                 continue
@@ -239,18 +260,40 @@ def find_exams(
                 start -= timedelta(days=start.weekday())
                 first = start + timedelta(weeks=weeks[0] - 1)
                 last = start + timedelta(weeks=weeks[1] - 1, days=4)
-                found.append(Found(kind, number, first, last, ESTIMATED, weeks[0], source, evidence, url))
+                found.append(Found(kind, number, first, last, ESTIMATED, weeks[0], source, evidence, url, posted_at))
     return found
 
 
+def find_note(text: str, url: str, posted_at: datetime | None) -> list[Note]:
+    """An announcement that names an exam somewhere and, somewhere else in the same announcement, says its date is
+    not settled yet ("we are considering Thursday or Friday", "kesinleşmedi"): the keyword and the uncertain wording
+    are often in different sentences, so this looks at the whole text rather than `find_exams`'s narrower window
+    around each date. Never produces a date — only a quote worth showing the student alongside the exam."""
+    match = KEYWORD.search(text)
+    if not match:
+        return []
+    quote = next((chunk for chunk in _chunks(text) if UNCERTAIN.search(chunk)), None)
+    if quote is None:
+        return []
+    kind = "midterm" if match["midterm"] else "final"
+    number = _number(text, match.start(), match.end())
+    return [Note(kind, number, quote[:MAX_EVIDENCE_CHARS], posted_at, url)]
+
+
+def _rank(item: Found, today: date) -> tuple[int, float, int]:
+    # Among equally trusted dates (two ANNOUNCED dates: the original and a postponement), the one announced more
+    # recently wins; a date without a `posted_at` (syllabus, file, canvas due date) ranks behind any that has one.
+    posted = item.posted_at.timestamp() if item.posted_at else float("-inf")
+    return TRUST[item.status], posted, -abs((item.starts_on - today).days)
+
+
 def best(found: Iterable[Found], today: date) -> list[Found]:
-    """One answer per exam: the most trusted, and among equals the next one to come."""
+    """One answer per exam: the most trusted, and among equals the one most recently announced."""
     chosen: dict[tuple[str, int], Found] = {}
     for item in found:
         key = (item.kind, item.number)
         old = chosen.get(key)
-        rank = (TRUST[item.status], -abs((item.starts_on - today).days))
-        if old is None or rank > (TRUST[old.status], -abs((old.starts_on - today).days)):
+        if old is None or _rank(item, today) > _rank(old, today):
             chosen[key] = item
     # "Midterm" and "Midterm 1" are the same exam when only one of them has a date.
     for kind in ("midterm", "final"):
@@ -275,18 +318,35 @@ def exams_in_items(items: Iterable[Item], today: date, term_starts: dict[str, da
             continue
         if item.kind == "announcement":
             text = f"{item.title}\n{item.body}"
-            found = find_exams(text, today, term_starts.get(item.course), ANNOUNCED, "announcement", item.url, quizzes=True)
+            found = find_exams(
+                text, today, term_starts.get(item.course), ANNOUNCED, "announcement", item.url, quizzes=True,
+                posted_at=item.posted_at,
+            )
             # An announcement that gives only a week is the teacher's word on the week, and still not a date.
         elif item.kind in ("assignment", "quiz", "event") and item.due_at and is_exam_title(item.title):
             match = KEYWORD.search(item.title)
             found = [Found(
                 "midterm" if match["midterm"] else "final", _number(item.title, match.start(), match.end()),
                 item.due_at.date(), None, ANNOUNCED, None, "canvas", item.title[:MAX_EVIDENCE_CHARS], item.url,
+                item.posted_at,
             )]
         else:
             continue
         if found:
             by_course.setdefault(item.course, []).extend(found)
+    return by_course
+
+
+def notes_in_items(items: Iterable[Item]) -> dict[str, list[Note]]:
+    """Announcements that mention an exam but say its date may still change. Separate from `exams_in_items`: these
+    never set or move a date, so a quiz or an unrelated announcement can never change a midterm's date through this."""
+    by_course: dict[str, list[Note]] = {}
+    for item in items:
+        if not item.course or item.kind != "announcement":
+            continue
+        notes = find_note(f"{item.title}\n{item.body}", item.url, item.posted_at)
+        if notes:
+            by_course.setdefault(item.course, []).extend(notes)
     return by_course
 
 
@@ -394,6 +454,7 @@ def scan_course(
 
 
 __all__ = [
-    "ANNOUNCED", "CHECK_DAY_CHOICES", "CourseScan", "DEFAULT_CHECK_DAYS", "ESTIMATED", "Found", "SYLLABUS", "TRUST", "best", "exams_in_items", "fetch_onedrive",
-    "find_date", "find_exams", "find_week", "is_onedrive", "scan_course", "term_start_guess",
+    "ANNOUNCED", "CHECK_DAY_CHOICES", "CourseScan", "DEFAULT_CHECK_DAYS", "ESTIMATED", "Found", "Note", "SYLLABUS", "TRUST", "best",
+    "exams_in_items", "fetch_onedrive", "find_date", "find_exams", "find_note", "find_week", "is_onedrive", "notes_in_items",
+    "scan_course", "term_start_guess",
 ]

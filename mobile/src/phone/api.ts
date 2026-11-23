@@ -11,11 +11,12 @@ import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
 import { isExamTitle, quizNumber } from './exams';
-import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSyllabusCheckDays } from './settings';
+import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSpamFilterEnabled, saveSyllabusCheckDays } from './settings';
 import { parseMailHost } from './mail';
 import { writeReply } from './reply';
 import { recipients, sendMail, SmtpError } from './smtp';
 import { addEvent, openInCalendar } from './calendar';
+import { refineWithModel, THRESHOLD as SPAM_THRESHOLD } from './spam';
 import { suggestEvents, suggestTasks } from './suggest';
 import { addTask, keepTask, localDay, outdatedTasks, removeTask, updateTask } from './tasks';
 import { readState, StoredDraft, updateState } from './store';
@@ -145,6 +146,7 @@ export const phoneApi = {
         outgoing: isOutgoing(event.itemKey),
         hasFiles: !!item?.body?.includes('Ekler (telefonda açılmaz)'),
         fromSchool: !!state.meta.schoolDomain && !!item?.replyTo?.toLowerCase().endsWith(state.meta.schoolDomain.toLowerCase()),
+        spam: item?.kind === 'mail' && (item.spamScore ?? 0) >= SPAM_THRESHOLD ? { reasons: item.spamReasons ?? [] } : null,
         current: item
           ? { postedAt: item.postedAt, title: item.title, course: item.course, dueAt: item.dueAt, submitted: item.submitted, grade: item.grade }
           : null,
@@ -169,6 +171,35 @@ export const phoneApi = {
   async setSyllabusCheck(days: number): Promise<{ days: number }> {
     await saveSyllabusCheckDays(days);
     return { days };
+  },
+
+  async spamFilterSetting(): Promise<{ enabled: boolean }> {
+    return { enabled: (await loadPhoneSettings()).spamFilterEnabled };
+  },
+
+  async setSpamFilterSetting(enabled: boolean): Promise<{ enabled: boolean }> {
+    await saveSpamFilterEnabled(enabled);
+    return { enabled };
+  },
+
+  async spamCheck(key: string): Promise<{ score: number; reasons: string[] }> {
+    const state = await readState();
+    const item = state.items[key];
+    if (!item || item.kind !== 'mail') throw new ApiError('mail bulunamadı', 404);
+    const cheap = { score: item.spamScore ?? 0, reasons: item.spamReasons ?? [] };
+    if (item.spamChecked || cheap.score < SPAM_THRESHOLD) return cheap;
+    const config = cloudConfig(await loadPhoneSettings());
+    if (!config) return cheap; // no model key: the cheap tier's own result stands
+    const result = await refineWithModel(cloudModel(config, 'Spam kontrolü').chat, item.sender, item.title, item.body, cheap);
+    await updateState((next) => {
+      const row = next.items[key];
+      if (row) {
+        row.spamScore = result.score;
+        row.spamReasons = result.reasons;
+        row.spamChecked = true;
+      }
+    });
+    return { score: result.score, reasons: result.reasons };
   },
 
   async setEventRead(id: number, read: boolean): Promise<{ status: string }> {
@@ -202,6 +233,7 @@ export const phoneApi = {
     return {
       key: row.key, kind: row.kind, title: row.title, course: row.course, sender: row.sender, body: row.body, url: row.url,
       postedAt: row.postedAt, dueAt: row.dueAt, grade: row.grade, submitted: row.submitted, replyTo: row.replyTo, attachments: [], inTasks: !!state.meta.gtasks?.[key],
+      spam: row.kind === 'mail' && (row.spamScore ?? 0) >= SPAM_THRESHOLD ? { reasons: row.spamReasons ?? [] } : null,
     };
   },
 

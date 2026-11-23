@@ -26,7 +26,7 @@ import {
   verticalScroll,
   weight,
 } from '@expo/ui/jetpack-compose/modifiers';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Linking, useWindowDimensions } from 'react-native';
 
 import { api, Attachment, Connection, ItemDetail } from './api';
@@ -81,13 +81,25 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
   const [findingEvents, setFindingEvents] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk } | null>(null);
+  const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk; spamReasons?: string[] } | null>(null);
+  const [spamReasons, setSpamReasons] = useState<string[] | null>(null);
+  // The native-rendered link card can hold on to the first `onLink` closure it was given rather than the latest
+  // one, so `openLink` reads this ref (always current) instead of the `spamReasons` state directly.
+  const spamReasonsRef = useRef<string[] | null>(null);
+  useEffect(() => {
+    spamReasonsRef.current = spamReasons;
+  }, [spamReasons]);
 
-  // Canvas gives these links, but they are still checked: only links under the school domain open without asking.
+  // Canvas gives these links, but they are still checked: only links under the school domain open without asking —
+  // unless the mail itself was flagged, in which case every link in it goes through the dialog and its cooldown.
   const openLink = (link: string) => {
+    const current = spamReasonsRef.current;
     const risk = linkRisk(link);
-    if (risk.level === 'school') void Linking.openURL(link);
-    else setAsking({ url: link, host: hostOf(link), risk });
+    if (risk.level === 'school' && !current) {
+      void Linking.openURL(link);
+      return;
+    }
+    setAsking({ url: link, host: hostOf(link), risk, spamReasons: current ?? undefined });
   };
 
   useEffect(() => {
@@ -99,6 +111,14 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           if (!live) return;
           setDetail(found);
           if (found.inTasks !== undefined) setTaskAdded(found.inTasks);
+          if (found.spam) {
+            setSpamReasons(found.spam.reasons);
+            // On demand only, never in the background: refines the cheap tier's guess now that the student is
+            // actually looking at this one mail.
+            api.spamCheck(connection, target.key).then((result) => { if (live) setSpamReasons(result.reasons); }, () => undefined);
+          } else {
+            setSpamReasons(null);
+          }
         },
         () => live && setDetail(null), // reminders and alerts have no record behind them
       )
@@ -239,7 +259,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
             <SenderRow sender={message.sender} when={message.postedAt} />
             <Surface color={colors.surfaceContainerLow} shape={rounded(24)} modifiers={[fillMaxWidth()]}>
               <Column modifiers={[paddingAll(CARD_PADDING)]}>
-                <MailBody body={tidyText(message.body)} />
+                <MailBody body={tidyText(message.body)} spamReasons={message.spam?.reasons} />
               </Column>
             </Surface>
           </Column>
@@ -251,6 +271,12 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
           <WorkInfo detail={detail} when={when} work={work} />
         )}
 
+        {mail && spamReasons?.length ? (
+          <Notice tone="error">
+            {`Bu mail şüpheli: ${spamReasons.join(' ')} Bağlantılarına tıklamadan önce 15 saniye beklet, şifre ya da kişisel bilgi girme.`}
+          </Notice>
+        ) : null}
+
         <Surface color={colors.surfaceContainerLowest ?? colors.surface} shape={rounded(24)} modifiers={[fillMaxWidth()]}>
           <Column modifiers={[paddingAll(CARD_PADDING)]}>
             {loading ? (
@@ -260,7 +286,7 @@ export function DetailSheet({ connection, target, tasksEnabled, inTasks, onClose
                 Bu mail güvenli okuyucuda açılamadı: bozuk ya da zararlı olabilir. Gerekirse webmailde dikkatle bak.
               </Notice>
             ) : body ? (
-              <MailBody body={body} />
+              <MailBody body={body} spamReasons={spamReasons ?? undefined} />
             ) : (
               <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyLarge' }}>
                 {files.some((f) => f.image) ? 'Bu mailde yazı yok, içerik görsellerde.' : 'Açıklama yok.'}

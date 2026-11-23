@@ -41,7 +41,7 @@ function isUnread(event: EventItem): boolean {
   return event.read === false;
 }
 
-type Filter = 'all' | 'unread' | 'important' | 'conversation' | 'files' | 'school' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder' | 'grades';
+type Filter = 'all' | 'unread' | 'important' | 'conversation' | 'files' | 'school' | 'spam' | 'announcement' | 'work' | 'exam' | 'grade' | 'message' | 'reminder' | 'grades';
 
 const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
   canvas: [
@@ -61,6 +61,7 @@ const FILTERS: Record<EventSource, { id: Filter; label: string }[]> = {
     { id: 'conversation', label: 'Konuşma' },
     { id: 'files', label: 'Ekli' },
     { id: 'school', label: 'Okuldan' },
+    { id: 'spam', label: 'Şüpheli' },
   ],
 };
 
@@ -73,6 +74,7 @@ function matches(event: EventItem, filter: Filter): boolean {
     case 'conversation': return threadSize(event) > 1;
     case 'files': return !!event.hasFiles;
     case 'school': return !!event.fromSchool;
+    case 'spam': return !!event.spam;
     case 'announcement': return event.itemKey.startsWith('announcement:');
     case 'exam': return event.type === 'exam';
     case 'grade': return event.type === 'graded';
@@ -86,6 +88,7 @@ function matches(event: EventItem, filter: Filter): boolean {
 }
 
 function iconFor(event: EventItem) {
+  if (event.spam) return icons.error;
   if (event.type === 'exam') return courseIcon(event.current?.course ?? event.title.split(': ')[0]);
   if (event.type === 'reminder') return icons.schedule;
   if (event.type === 'graded') return icons.star;
@@ -113,14 +116,15 @@ function EventCard({ item, now, shape, onOpen }: {
   // A deadline that has passed or been handed in is history: it keeps its text but stops looking alarming.
   const critical = item.level === 'critical' && !view.over;
   const high = item.level === 'high' && !view.over;
+  const flagged = !!item.spam;
   return (
     <Surface color={unread ? colors.surfaceContainerHigh : colors.surfaceContainerLow} shape={shape} onClick={onOpen} modifiers={[fillMaxWidth()]}>
       <Row modifiers={[paddingAll(14)]} horizontalArrangement={{ spacedBy: 12 }}>
         <ShapeIcon
           icon={iconFor(item)}
-          shape={critical ? shapes.Boom : high ? shapes.Cookie7Sided : Shapes.Circle}
-          container={critical ? colors.error : high ? colors.primaryContainer : colors.surfaceContainerHighest}
-          content={critical ? colors.onError : high ? colors.onPrimaryContainer : colors.onSurfaceVariant}
+          shape={flagged || critical ? shapes.Boom : high ? shapes.Cookie7Sided : Shapes.Circle}
+          container={flagged || critical ? colors.error : high ? colors.primaryContainer : colors.surfaceContainerHighest}
+          content={flagged || critical ? colors.onError : high ? colors.onPrimaryContainer : colors.onSurfaceVariant}
           dp={40}
         />
         <Column modifiers={[weight(1)]} verticalArrangement={{ spacedBy: 2 }}>

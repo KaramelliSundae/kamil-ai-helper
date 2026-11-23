@@ -10,7 +10,7 @@ import {
   useMaterialColors,
 } from '@expo/ui/jetpack-compose';
 import { fillMaxWidth, padding, paddingAll, weight } from '@expo/ui/jetpack-compose/modifiers';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Linking } from 'react-native';
 
 import { icons } from './icons';
@@ -22,16 +22,21 @@ import { rounded } from './ui';
  * already turned the HTML into words, so nothing in a mail can run, load or track anything here. Links
  * open only when tapped, always show where they really go, and ask first when that is outside the school.
  */
-export function MailBody({ body }: { body: string }) {
+export function MailBody({ body, spamReasons }: { body: string; spamReasons?: string[] }) {
   const parsed = useMemo(() => parseMail(body), [body]);
   const [english, setEnglish] = useState(false);
   const [quoted, setQuoted] = useState(false);
-  const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk } | null>(null);
+  const [asking, setAsking] = useState<{ url: string; host: string; risk: LinkRisk; spamReasons?: string[] } | null>(null);
 
+  // `spamReasons` set means the mail itself was flagged: every link in it goes through the dialog and its
+  // cooldown, even one that would otherwise open straight away as a school link.
   const open = (url: string) => {
     const risk = linkRisk(url);
-    if (risk.level === 'school') void Linking.openURL(url);
-    else setAsking({ url, host: hostOf(url), risk });
+    if (risk.level === 'school' && !spamReasons?.length) {
+      void Linking.openURL(url);
+      return;
+    }
+    setAsking({ url, host: hostOf(url), risk, spamReasons });
   };
 
   return (
@@ -144,21 +149,35 @@ function Toggle({ onToggle, icon, label }: { open: boolean; onToggle: () => void
   );
 }
 
-export function LinkDialog({ target, onClose }: { target: { url: string; host: string; risk: LinkRisk }; onClose: () => void }) {
+const SPAM_LINK_COOLDOWN_SECONDS = 15;
+
+/** `spamReasons` set means the mail this link came from was flagged: the link stays locked for a cooldown, with
+ * the reasons shown, before it can be opened at all — on top of the ordinary risk check below. */
+export function LinkDialog({ target, onClose }: { target: { url: string; host: string; risk: LinkRisk; spamReasons?: string[] }; onClose: () => void }) {
   const suspicious = target.risk.level === 'suspicious';
+  const flagged = !!target.spamReasons?.length;
+  const [remaining, setRemaining] = useState(flagged ? SPAM_LINK_COOLDOWN_SECONDS : 0);
+  useEffect(() => {
+    if (!flagged) return;
+    const timer = setInterval(() => setRemaining((left) => Math.max(0, left - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [flagged]);
+  const locked = flagged && remaining > 0;
   return (
     <AlertDialog onDismissRequest={onClose}>
       <AlertDialog.Title>
-        <Text>{suspicious ? 'Bu bağlantı şüpheli' : 'Bağlantı açılsın mı?'}</Text>
+        <Text>{flagged ? 'Bu mail güvenli olmayabilir' : suspicious ? 'Bu bağlantı şüpheli' : 'Bağlantı açılsın mı?'}</Text>
       </AlertDialog.Title>
       <AlertDialog.Text>
         <Text>
-          {`${target.risk.reason}\n\nGideceği yer: ${target.host}\n\nSpam olabilecek maillerdeki bağlantılarda şifre ya da kişisel bilgi girme.`}
+          {flagged
+            ? `${target.spamReasons!.join('\n')}\n\nGideceği yer: ${target.host}\n\nŞifre ya da kişisel bilgi girme. Emin değilsen bağlantıyı açma.`
+            : `${target.risk.reason}\n\nGideceği yer: ${target.host}\n\nSpam olabilecek maillerdeki bağlantılarda şifre ya da kişisel bilgi girme.`}
         </Text>
       </AlertDialog.Text>
       <AlertDialog.ConfirmButton>
-        <TextButton onClick={() => { onClose(); void Linking.openURL(target.url); }}>
-          <Text>{suspicious ? 'Yine de aç' : 'Aç'}</Text>
+        <TextButton enabled={!locked} onClick={() => { onClose(); void Linking.openURL(target.url); }}>
+          <Text>{locked ? `Bekle (${remaining})` : flagged || suspicious ? 'Yine de aç' : 'Aç'}</Text>
         </TextButton>
       </AlertDialog.ConfirmButton>
       <AlertDialog.DismissButton>

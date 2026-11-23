@@ -19,6 +19,7 @@ from .docparse import read_here
 from .mailbox import Cursor, Mailbox
 from .models import CRITICAL, HIGH, Item
 from .notify import format_time
+from .spam import score_mail
 from .store import Change, Store, to_text, to_time
 from .text import shorten
 
@@ -94,11 +95,19 @@ def record_change(store: Store, settings: Settings, item: Item, change: Change, 
 def ingest(store: Store, settings: Settings, items: list[Item], now: datetime, baseline: bool) -> int:
     """Stores items and records what changed. A baseline run only learns the current state."""
     count = 0
+    # Off by the student's own word (Settings > spam filter) means off entirely: nothing here is even scored.
+    spam_on = store.get_meta("spam_filter_enabled") != "0"
+    known_senders = store.mail_senders() if spam_on and any(item.kind == "mail" for item in items) else set()
     for item in items:
         for change in store.upsert(item, now):
             if not baseline:
                 record_change(store, settings, item, change, now)
                 count += 1
+        if spam_on and item.kind == "mail":
+            result = score_mail(
+                item.sender, item.title, item.body, bool(item.message_id), item.bulk, settings.school_domain, known_senders,
+            )
+            store.set_spam(item.key, result.score, result.reasons)
     return count
 
 
@@ -176,6 +185,9 @@ def update_exams(store: Store, settings: Settings, canvas: CanvasClient, items: 
     events = 0
     for course, found in exams.exams_in_items(items, today, starts).items():
         events += record_exams(store, settings, course, exams.best(found, today), now, first_run)
+    for course, notes in exams.notes_in_items(items).items():
+        for note in notes:
+            store.put_exam_note(course, note.kind, note.number, note.text, note.posted_at, note.url)
 
     every = int(store.get_meta("syllabus_check_days") or exams.DEFAULT_CHECK_DAYS)
     if not every:

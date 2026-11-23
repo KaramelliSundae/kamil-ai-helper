@@ -96,6 +96,12 @@ export const api = {
     c.mode === 'phone' ? phoneApi.syllabusCheck() : request<{ days: number }>(c, '/v1/settings/syllabus-check', 'GET'),
   setSyllabusCheck: (c: Connection, days: number) =>
     c.mode === 'phone' ? phoneApi.setSyllabusCheck(days) : request<{ days: number }>(c, '/v1/settings/syllabus-check', 'POST', { days }),
+  spamFilterSetting: (c: Connection) =>
+    c.mode === 'phone' ? phoneApi.spamFilterSetting() : request<{ enabled: boolean }>(c, '/v1/settings/spam-filter', 'GET'),
+  setSpamFilterSetting: (c: Connection, enabled: boolean) =>
+    c.mode === 'phone' ? phoneApi.setSpamFilterSetting(enabled) : request<{ enabled: boolean }>(c, '/v1/settings/spam-filter', 'POST', { enabled }),
+  spamCheck: (c: Connection, key: string) =>
+    c.mode === 'phone' ? phoneApi.spamCheck(key) : request<{ score: number; reasons: string[] }>(c, '/v1/mail/spam-check', 'POST', { key }),
   setEventRead: (c: Connection, id: number, read: boolean) =>
     c.mode === 'phone' ? phoneApi.setEventRead(id, read) : request<{ status: string }>(c, `/v1/events/${id}/read`, 'POST', { read }),
   markAllRead: (c: Connection, source: EventSource) =>

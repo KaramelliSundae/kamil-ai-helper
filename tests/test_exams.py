@@ -9,7 +9,7 @@ import pytest
 from ai_ders import exams
 from ai_ders.canvas import CanvasClient
 from ai_ders.docparse import parse, read_docx
-from ai_ders.exams import ANNOUNCED, ESTIMATED, SYLLABUS, best, exams_in_items, fetch_onedrive, find_exams, is_onedrive
+from ai_ders.exams import ANNOUNCED, ESTIMATED, SYLLABUS, best, exams_in_items, fetch_onedrive, find_exams, find_note, is_onedrive
 from ai_ders.models import Item
 from ai_ders.store import Store
 from ai_ders.watcher import update_exams
@@ -152,6 +152,62 @@ def test_the_firmest_answer_wins():
     told = one("Midterm: 15.11.2026")
     assert best([week, dated, told], TODAY) == [told]
     assert best([week, dated], TODAY) == [dated]
+
+
+def test_a_postponement_beats_the_original_even_when_its_date_is_further_off():
+    """Both are ANNOUNCED, so trust alone can't break the tie. The one announced more recently must win, not the one
+    whose date happens to sit closer to today — that was the bug: a stale exam date survived every later rescan
+    because the original announcement's date was nearer to "today" than the postponement's."""
+    today = date(2026, 11, 23)
+    original = find_exams(
+        "Midterm: 25.11.2026", today, TERM, ANNOUNCED, "announcement", posted_at=datetime(2026, 11, 12, tzinfo=UTC)
+    )[0]
+    postponed = find_exams(
+        "Midterm postponed to 30.11.2026", today, TERM, ANNOUNCED, "announcement", posted_at=datetime(2026, 11, 23, tzinfo=UTC)
+    )[0]
+    assert best([original, postponed], today) == [postponed]
+    assert best([postponed, original], today) == [postponed]  # order in the input must not matter
+
+
+def test_without_a_posted_at_the_closer_date_still_wins_as_before():
+    """Syllabus/file/canvas sources carry no `posted_at`; two of those tied on trust must still fall back to the old
+    closer-to-today rule, so this fix does not change that existing behavior."""
+    today = date(2026, 11, 23)
+    closer = find_exams("Midterm 22.11.2026", today, TERM, SYLLABUS, "syllabus")[0]
+    farther = find_exams("Midterm 05.12.2026", today, TERM, SYLLABUS, "syllabus")[0]
+    assert best([farther, closer], today) == [closer]
+
+
+def test_find_note_catches_uncertainty_in_a_different_sentence_than_the_keyword():
+    text = (
+        "Midterm Exam Rescheduling\n\nWe have been informed that our midterm exam overlaps another course. "
+        "We are considering moving it to Thursday or Friday."
+    )
+    found = find_note(text, "https://c/1", datetime(2026, 11, 18, tzinfo=UTC))
+    assert len(found) == 1
+    assert found[0].kind == "midterm" and found[0].number == 0
+    assert "considering" in found[0].text.lower()
+
+
+def test_find_note_is_empty_without_uncertain_wording():
+    assert find_note("Midterm: 25 Kasım 2026 tarihinde yapılacaktır.", "", None) == []
+
+
+def test_find_note_is_empty_without_an_exam_keyword():
+    assert find_note("We are considering changing the deadline for the homework.", "", None) == []
+
+
+def test_a_quiz_announcement_cannot_change_a_midterm_date():
+    """A quiz and a midterm are different (kind, number) keys; one must never overwrite or merge with the other,
+    even when both are ANNOUNCED and posted close together."""
+    today = date(2026, 11, 23)
+    midterm = one("Midterm: 25.11.2026")
+    quiz = find_exams("Quiz 1: 24.11.2026", today, TERM, ANNOUNCED, "announcement", quizzes=True)[0]
+    result = best([midterm, quiz], today)
+    assert {(f.kind, f.number, f.starts_on) for f in result} == {
+        ("midterm", 0, date(2026, 11, 25)),
+        ("quiz", 1, date(2026, 11, 24)),
+    }
 
 
 def item(**fields) -> Item:
@@ -354,6 +410,30 @@ def test_an_announced_date_that_moves_says_so(store, settings):
     moved = replace(told, body="Vize 21 Kasım 2026 tarihine alındı.")
     assert update_exams(store, settings, canvas, [moved], lambda data: "", NOW + timedelta(hours=1)) == 1
     assert "değişti" in store.recent_events(1)[0]["title"]
+
+
+def test_a_tentative_rescheduling_note_appears_then_clears_once_resolved(store, settings):
+    """A side note must never move the exam's own date, and must disappear once a firmer answer supersedes it —
+    the pop-up should only ever carry a note that is still live doubt about the currently stored date."""
+    canvas = canvas_with("")
+    firm = replace(item(), title="Vize Duyurusu", body="Vize 14 Kasım 2026 tarihinde.", posted_at=NOW - timedelta(days=2))
+    update_exams(store, settings, canvas, [firm], lambda data: "", NOW)
+    assert rows(store)[("midterm", 0)]["note"] == ""
+
+    unsure = replace(
+        item(), title="Vize Tarihi Hakkında",
+        body="Vize sınavımızın başka bir dersle çakıştığı bildirildi. Perşembe ya da Cuma günlerinden birine almayı düşünüyoruz.",
+        posted_at=NOW + timedelta(hours=1),
+    )
+    update_exams(store, settings, canvas, [unsure], lambda data: "", NOW + timedelta(hours=2))
+    note_row = rows(store)[("midterm", 0)]
+    assert "düşünüyoruz" in note_row["note"]
+    assert note_row["starts_on"] == "2026-11-14"  # the date itself must not have moved
+
+    resolved = replace(item(), title="Vize Kesin Tarih", body="Vize 21 Kasım 2026 tarihinde yapılacaktır.", posted_at=NOW + timedelta(days=1))
+    update_exams(store, settings, canvas, [resolved], lambda data: "", NOW + timedelta(days=1, hours=1))
+    final_row = rows(store)[("midterm", 0)]
+    assert final_row["starts_on"] == "2026-11-21" and final_row["note"] == ""
 
 
 def test_hostile_text_only_ever_gives_a_date():

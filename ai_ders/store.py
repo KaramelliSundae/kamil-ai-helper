@@ -15,6 +15,7 @@ import sqlite3
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parseaddr
 from pathlib import Path
 
 from .models import Attachment, Item
@@ -35,7 +36,10 @@ CREATE TABLE IF NOT EXISTS items (
   submitted INTEGER NOT NULL,
   first_seen TEXT NOT NULL,
   last_seen TEXT NOT NULL,
-  attachments TEXT NOT NULL DEFAULT '[]'
+  attachments TEXT NOT NULL DEFAULT '[]',
+  spam_score REAL NOT NULL DEFAULT 0,
+  spam_reasons TEXT NOT NULL DEFAULT '[]',
+  spam_checked INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS items_due ON items (due_at);
 CREATE TABLE IF NOT EXISTS events (
@@ -86,6 +90,9 @@ CREATE TABLE IF NOT EXISTS exams (
   evidence TEXT NOT NULL,
   url TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  note_posted_at TEXT NOT NULL DEFAULT '',
+  note_url TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (course, kind, number)
 );
 CREATE TABLE IF NOT EXISTS exam_courses (
@@ -181,6 +188,11 @@ class Store:
         self._add_column("memories", "untrusted", "INTEGER NOT NULL DEFAULT 0")
         self._add_column("drafts", "warnings", "TEXT NOT NULL DEFAULT ''")
         self._add_column("exam_courses", "attendance", "TEXT NOT NULL DEFAULT '[]'")
+        for column in ("note", "note_posted_at", "note_url"):
+            self._add_column("exams", column, "TEXT NOT NULL DEFAULT ''")
+        self._add_column("items", "spam_score", "REAL NOT NULL DEFAULT 0")
+        self._add_column("items", "spam_reasons", "TEXT NOT NULL DEFAULT '[]'")
+        self._add_column("items", "spam_checked", "INTEGER NOT NULL DEFAULT 0")
         # Mail conversations and replies. "refs", since REFERENCES is an SQL keyword.
         for column in ("thread", "reply_to", "message_id", "refs"):
             self._add_column("items", column, "TEXT NOT NULL DEFAULT ''")
@@ -302,6 +314,18 @@ class Store:
         )
         self.db.commit()
         return changes
+
+    def set_spam(self, key: str, score: float, reasons: tuple[str, ...], checked: bool = False) -> None:
+        self.db.execute(
+            "UPDATE items SET spam_score = ?, spam_reasons = ?, spam_checked = ? WHERE key = ?",
+            (score, json.dumps(reasons, ensure_ascii=False), int(checked), key),
+        )
+        self.db.commit()
+
+    def mail_senders(self) -> set[str]:
+        """Every address the student has mail from already, lower-cased: a new sender is one not in here."""
+        rows = self.db.execute("SELECT DISTINCT sender FROM items WHERE kind = 'mail'").fetchall()
+        return {address.lower() for sender in (row["sender"] for row in rows) for _, address in [parseaddr(sender)] if address}
 
     def add_quiet_event(self, item_key: str, title: str, body: str, at: datetime) -> None:
         """An event born read and already "sent": shown in its conversation, never notified, never in a digest.
@@ -444,14 +468,35 @@ class Store:
             return None
         if old is not None and old["starts_on"] == starts and old["status"] == found.status:
             return None
+        # A side note ("this may still change") stays only while it is newer than the answer it is a note about;
+        # a firmer date that comes after it resolves the doubt, so the note is dropped rather than carried forward.
+        posted = to_text(getattr(found, "posted_at", None)) or ""
+        keep_note = old is not None and old["note_posted_at"] and (not posted or posted < old["note_posted_at"])
         self.db.execute(
-            "INSERT OR REPLACE INTO exams (course, kind, number, starts_on, ends_on, status, week, source, evidence, url, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO exams (course, kind, number, starts_on, ends_on, status, week, source, evidence, url, "
+            "updated_at, note, note_posted_at, note_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (course, found.kind, found.number, starts, found.ends_on.isoformat() if found.ends_on else None, found.status,
-             found.week, found.source, found.evidence, found.url, to_text(now)),
+             found.week, found.source, found.evidence, found.url, to_text(now),
+             old["note"] if keep_note else "", old["note_posted_at"] if keep_note else "", old["note_url"] if keep_note else ""),
         )
         self.db.commit()
         return "new" if old is None or old["status"] != found.status else "moved"
+
+    def put_exam_note(self, course: str, kind: str, number: int, text: str, posted_at: datetime | None, url: str) -> bool:
+        """A side note about an exam whose date may still change: kept only on top of an exam that is already known,
+        and only while it says something newer than both the stored date and any note already there."""
+        row = self.db.execute(
+            "SELECT updated_at, note_posted_at FROM exams WHERE course = ? AND kind = ? AND number = ?", (course, kind, number)
+        ).fetchone()
+        posted = to_text(posted_at) or ""
+        if row is None or not posted or posted <= row["updated_at"] or (row["note_posted_at"] and posted <= row["note_posted_at"]):
+            return False
+        self.db.execute(
+            "UPDATE exams SET note = ?, note_posted_at = ?, note_url = ? WHERE course = ? AND kind = ? AND number = ?",
+            (text, posted, url, course, kind, number),
+        )
+        self.db.commit()
+        return True
 
     def exams(self) -> list[sqlite3.Row]:
         return self.db.execute("SELECT * FROM exams ORDER BY starts_on").fetchall()
