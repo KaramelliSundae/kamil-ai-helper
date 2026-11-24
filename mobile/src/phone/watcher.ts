@@ -358,14 +358,15 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
   }
   // Each source fails on its own: Canvas being down never stops mail, and the other way round.
   const mailSettings = await loadMailSettings();
-  let mail: { items: MailItem[]; cursor: { uidvalidity: number; lastUid: number } } | null = null;
+  let mail: Awaited<ReturnType<typeof readNewMail>> | null = null;
   let sent: Awaited<ReturnType<typeof readSentMail>> = null;
   let mailFailure: unknown = null;
   if (mailSettings.host && mailSettings.password) {
     try {
       const { meta } = await readState();
-      mail = await readNewMail(mailSettings, meta.mailWindowRead ? meta.mailCursor ?? null : null, now);
-      sent = await readSentMail(mailSettings, meta.sentCursor ?? null, now);
+      const mailMode = settings.mailProtocol;
+      mail = await readNewMail(mailSettings, meta.mailWindowRead ? meta.mailCursor ?? null : null, now, mailMode);
+      sent = await readSentMail(mailSettings, meta.sentCursor ?? null, now, mailMode);
     } catch (error) {
       mailFailure = error;
     }
@@ -406,14 +407,15 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
       const firstRun = !state.meta.mailWindowRead; // the last days are read quietly, so a new account does not ring for all of them
       // Off by the student's own word (Settings > spam filter) means off entirely: nothing here is even scored.
       const spamOn = settings.spamFilterEnabled;
-      const knownSenders = spamOn
-        ? new Set(
-            Object.values(state.items).filter((i) => i.kind === 'mail').map((i) => splitSender(i.sender).address.toLowerCase()).filter(Boolean),
-          )
-        : new Set<string>();
+      const knownMail = Object.values(state.items).filter((i) => i.kind === 'mail');
+      const knownSenders = spamOn ? new Set(knownMail.map((i) => splitSender(i.sender).address.toLowerCase()).filter(Boolean)) : new Set<string>();
+      const knownMessageIds = new Set(knownMail.map((i) => i.messageId).filter(Boolean));
       for (const item of mail.items) {
+        // A mail protocol switch (IMAP <-> POP3 fallback) keys the same mail differently, so it can look
+        // like a brand-new item here under its new key even though it was already seen and reported once.
+        const reappeared = !!item.messageId && !state.items[item.key] && knownMessageIds.has(item.messageId);
         for (const change of upsert(state, item, stamp)) {
-          if (!firstRun) recordChange(state, item, change, now);
+          if (!firstRun && !(reappeared && change.type === 'new')) recordChange(state, item, change, now);
         }
         if (spamOn) {
           const result = scoreMail(item.sender, item.title, item.body, !!item.messageId, item.bulk, state.meta.schoolDomain ?? '', knownSenders);
@@ -422,6 +424,7 @@ export async function poll(now = new Date(), background = false): Promise<PollRe
         }
       }
       state.meta.mailCursor = mail.cursor;
+      state.meta.mailProtocolActive = mail.cursor.protocol;
       state.meta.mailWindowRead = true;
       if (firstRun && state.meta.backfilled) state.meta.backfilled.mail = false;
       backfill(state, 'mail', now);

@@ -11,7 +11,7 @@ import { answer, cloudModel } from './agent';
 import { PROVIDER_NAMES } from './cloud';
 import { GeminiError } from './gemini';
 import { isExamTitle, quizNumber } from './exams';
-import { cloudConfig, loadMailSettings, loadPhoneSettings, saveSpamFilterEnabled, saveSyllabusCheckDays } from './settings';
+import { cloudConfig, loadMailSettings, loadPhoneSettings, saveMailProtocol, saveSpamFilterEnabled, saveSyllabusCheckDays } from './settings';
 import { parseMailHost } from './mail';
 import { writeReply } from './reply';
 import { recipients, sendMail, SmtpError } from './smtp';
@@ -180,6 +180,17 @@ export const phoneApi = {
   async setSpamFilterSetting(enabled: boolean): Promise<{ enabled: boolean }> {
     await saveSpamFilterEnabled(enabled);
     return { enabled };
+  },
+
+  async mailProtocolSetting(): Promise<{ mode: string; active: string }> {
+    const [settings, state] = await Promise.all([loadPhoneSettings(), readState()]);
+    return { mode: settings.mailProtocol, active: state.meta.mailProtocolActive ?? 'imap' };
+  },
+
+  async setMailProtocolSetting(mode: 'auto' | 'pop3'): Promise<{ mode: string; active: string }> {
+    await saveMailProtocol(mode);
+    const state = await readState();
+    return { mode, active: state.meta.mailProtocolActive ?? 'imap' };
   },
 
   async spamCheck(key: string): Promise<{ score: number; reasons: string[] }> {

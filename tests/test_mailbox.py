@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import poplib
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.utils import format_datetime
 
-from ai_ders.mailbox import MAX_BODY_BYTES, MAX_PER_POLL, MAX_SENT_PER_POLL, UNREADABLE, Cursor, Mailbox
+from ai_ders.mailbox import (
+    MAX_BODY_BYTES,
+    MAX_PER_POLL,
+    MAX_SENT_PER_POLL,
+    UNREADABLE,
+    Cursor,
+    Mailbox,
+    Pop3Cursor,
+    decode_cursor,
+    encode_cursor,
+)
 from ai_ders.mailparse import MailParseError, SandboxUnavailable, parse_here
 from ai_ders.models import HIGH, NORMAL
 
@@ -73,8 +84,50 @@ class FakeBox:
         self.logged_out = True
 
 
-def mailbox_for(box: FakeBox, parser=parse_here, image_dir=None) -> Mailbox:
-    return Mailbox("mail.uni.example.edu", 993, "u", "p", parser=parser, image_dir=image_dir, factory=box)
+class FakePop3:
+    """poplib's UIDL/LIST/TOP/RETR, answering the way Zimbra does: a stable, strictly increasing numeric
+    prefix before the dot in each UIDL (confirmed against the real account)."""
+
+    def __init__(self, messages: dict[int, bytes], first_item_id: int = 1000, login_error: Exception | None = None):
+        self.messages = messages  # sequence number -> raw bytes, in ascending sequence order
+        self.item_ids = {seq: first_item_id + i for i, seq in enumerate(sorted(messages))}
+        self.login_error = login_error
+        self.quit_called = False
+        self.topped: list[int] = []
+        self.retrieved: list[int] = []
+
+    def __call__(self, host, port, timeout=60, context=None):
+        return self
+
+    def user(self, user):
+        if self.login_error:
+            raise self.login_error
+
+    def pass_(self, password):
+        pass
+
+    def uidl(self):
+        return ("+OK", [f"{seq} {self.item_ids[seq]}.hash{seq}".encode() for seq in sorted(self.messages)], 0)
+
+    def list(self):
+        return ("+OK", [f"{seq} {len(self.messages[seq])}".encode() for seq in sorted(self.messages)], 0)
+
+    def top(self, which, howmuch):
+        self.topped.append(which)
+        header = self.messages[which].split(b"\n\n")[0] + b"\n\n"
+        return ("+OK", header.split(b"\n"), 0)
+
+    def retr(self, which):
+        self.retrieved.append(which)
+        return ("+OK", self.messages[which].split(b"\n"), 0)
+
+    def quit(self):
+        self.quit_called = True
+
+
+def mailbox_for(box: FakeBox, parser=parse_here, image_dir=None, pop3: FakePop3 | None = None) -> Mailbox:
+    extra = {"pop3_factory": pop3} if pop3 is not None else {}
+    return Mailbox("mail.uni.example.edu", 993, "u", "p", parser=parser, image_dir=image_dir, factory=box, **extra)
 
 
 def test_folder_is_opened_read_only_and_mail_stays_unread():
@@ -84,6 +137,95 @@ def test_folder_is_opened_read_only_and_mail_stays_unread():
     assert box.initial_folder is None  # never selected read-write, even briefly
     assert [i.sender for i in items] == ["Hoca <hoca@uni.example.edu>"]
     assert box.logged_out
+
+
+def test_a_dropped_login_is_retried_before_failing(monkeypatch):
+    box = FakeBox({101: raw_mail()})
+    good_login = box.login
+    attempts: list[None] = []
+
+    def flaky_login(user, password, initial_folder="INBOX"):
+        attempts.append(None)
+        if len(attempts) == 1:
+            raise OSError("socket error: EOF")
+        good_login(user, password, initial_folder)
+
+    box.login = flaky_login
+    monkeypatch.setattr("ai_ders.mailbox.time.sleep", lambda _seconds: None)
+    items, _ = mailbox_for(box).fetch_new(Cursor(5, 100))
+    assert len(attempts) == 2
+    assert [i.sender for i in items] == ["Hoca <hoca@uni.example.edu>"]
+
+
+def test_a_login_that_never_recovers_falls_back_to_pop3(monkeypatch):
+    box = FakeBox({101: raw_mail()})
+
+    def always_fails(user, password, initial_folder="INBOX"):
+        raise OSError("socket error: EOF")
+
+    box.login = always_fails
+    monkeypatch.setattr("ai_ders.mailbox.time.sleep", lambda _seconds: None)
+    pop3 = FakePop3({1: raw_mail()}, first_item_id=3469)
+    items, cursor = mailbox_for(box, pop3=pop3).fetch_new(Cursor(5, 100))
+    assert [i.sender for i in items] == ["Hoca <hoca@uni.example.edu>"]
+    assert cursor == Pop3Cursor(3469) and encode_cursor(cursor) == "pop3:3469"
+
+
+def test_a_login_that_never_recovers_still_raises_if_pop3_also_fails(monkeypatch):
+    box = FakeBox({101: raw_mail()})
+
+    def always_fails(user, password, initial_folder="INBOX"):
+        raise OSError("socket error: EOF")
+
+    box.login = always_fails
+    monkeypatch.setattr("ai_ders.mailbox.time.sleep", lambda _seconds: None)
+    pop3 = FakePop3({}, login_error=poplib.error_proto("-ERR authentication failed"))
+    with pytest.raises(poplib.error_proto):
+        mailbox_for(box, pop3=pop3).fetch_new(Cursor(5, 100))
+
+
+def test_forced_pop3_mode_never_touches_imap():
+    class ExplodingBox:
+        def __call__(self, **kwargs):
+            raise AssertionError("IMAP should never be contacted in forced POP3 mode")
+
+    pop3 = FakePop3({1: raw_mail()}, first_item_id=3469)
+    items, cursor = mailbox_for(ExplodingBox(), pop3=pop3).fetch_new(Cursor(5, 100), mode="pop3")
+    assert [i.sender for i in items] == ["Hoca <hoca@uni.example.edu>"]
+    assert cursor == Pop3Cursor(3469)
+
+
+def test_pop3_cursor_only_returns_mail_past_the_last_item_id():
+    pop3 = FakePop3({1: raw_mail("Eski"), 2: raw_mail("Yeni")}, first_item_id=100)  # ids 100, 101
+    items, cursor = mailbox_for(FakeBox({}), pop3=pop3).fetch_new(Pop3Cursor(100), mode="pop3")
+    assert [i.title for i in items] == ["Yeni"]
+    assert cursor == Pop3Cursor(101)
+
+
+def test_pop3_first_run_takes_only_the_newest():
+    pop3 = FakePop3({uid: raw_mail() for uid in range(1, MAX_PER_POLL + 6)}, first_item_id=1)
+    items, cursor = mailbox_for(FakeBox({}), pop3=pop3).fetch_new(None, mode="pop3")
+    assert len(items) == MAX_PER_POLL and cursor == Pop3Cursor(MAX_PER_POLL + 5)
+
+
+def test_pop3_huge_mail_is_kept_from_its_header_alone():
+    pop3 = FakePop3({1: raw_mail("Dev ek", text="x" * (MAX_BODY_BYTES + 1))}, first_item_id=1)
+    items, _ = mailbox_for(FakeBox({}), pop3=pop3).fetch_new(None, mode="pop3")
+    assert items[0].title == "Dev ek" and items[0].body == ""
+    assert pop3.topped == [1] and pop3.retrieved == []
+
+
+def test_crossing_from_pop3_back_to_imap_rereads_recent_mail_instead_of_jumping_to_now():
+    box = FakeBox({150: raw_mail(), 140: raw_mail()}, uidnext=151)
+    items, cursor = mailbox_for(box).fetch_new(Pop3Cursor(999), since=datetime(2026, 10, 20, 12, 0, tzinfo=UTC))
+    assert [i.key for i in items] == ["mail:5:140", "mail:5:150"]
+    assert cursor == Cursor(5, 150)
+
+
+def test_cursor_round_trip_including_the_pre_pop3_legacy_format():
+    assert decode_cursor(encode_cursor(Cursor(5, 100))) == Cursor(5, 100)
+    assert decode_cursor(encode_cursor(Pop3Cursor(3469))) == Pop3Cursor(3469)
+    assert decode_cursor("5:100") == Cursor(5, 100)  # saved before POP3 fallback existed
 
 
 def test_every_mail_goes_through_the_parser_as_raw_bytes():
@@ -225,6 +367,15 @@ def test_a_sent_folder_named_like_the_phone_expects():
     box.folders = [folder("INBOX"), folder("INBOX/Sent Items")]
     assert mailbox_for(box).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC)) == ([], Cursor(5, 0))
     assert box.selected == "INBOX/Sent Items"
+
+
+def test_fetch_sent_in_forced_pop3_mode_returns_none_without_touching_imap():
+    class ExplodingBox:
+        def __call__(self, **kwargs):
+            raise AssertionError("IMAP should never be contacted in forced POP3 mode")
+
+    result = mailbox_for(ExplodingBox()).fetch_sent(None, datetime(2026, 10, 20, tzinfo=UTC), mode="pop3")
+    assert result is None
 
 
 def test_no_sent_folder_is_not_an_error_and_none_is_made():

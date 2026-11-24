@@ -21,10 +21,10 @@ export function parseMailHost(value: string): { host: string; port: number } | n
   return port >= 1 && port <= 65535 ? { host: match[1].toLowerCase(), port } : null;
 }
 
-function account(settings: Pick<MailSettings, 'host' | 'user' | 'password'>) {
+function account(settings: Pick<MailSettings, 'host' | 'user' | 'password'>, protocol: 'imap' | 'pop3' = 'imap') {
   const target = parseMailHost(settings.host);
   if (!target) throw new ImapError('Mail sunucusunun adı geçersiz');
-  return { host: target.host, port: target.port, user: settings.user, password: settings.password };
+  return { host: target.host, port: target.port, user: settings.user, password: settings.password, protocol };
 }
 
 function refused(error: unknown): Error {
@@ -33,56 +33,96 @@ function refused(error: unknown): Error {
   return error instanceof Error ? error : new ImapError('Mail sunucusuna bağlanılamadı');
 }
 
-/** Tries the account. Returns how many mails the inbox holds. */
-export async function checkMailAccount(settings: Pick<MailSettings, 'host' | 'user' | 'password'>): Promise<number> {
+/** Tries the account. Returns how many mails the inbox holds. `mode: 'pop3'` is the manual override in
+ * Settings; `'auto'` still falls back to POP3 on its own if IMAP itself fails (not on a wrong password),
+ * so an account can be added or tested while IMAP is down even before the student finds that switch. */
+export async function checkMailAccount(settings: Pick<MailSettings, 'host' | 'user' | 'password'>, mode: 'auto' | 'pop3' = 'auto'): Promise<number> {
+  if (mode === 'auto') {
+    try {
+      return await countInbox(account(settings, 'imap'));
+    } catch (error) {
+      const converted = refused(error);
+      if (converted instanceof ImapAuthError) throw converted; // a wrong password: POP3 would refuse it too
+    }
+  }
   try {
-    return await countInbox(account(settings));
+    return await countInbox(account(settings, 'pop3'));
   } catch (error) {
     throw refused(error);
   }
 }
 
+function toMailItem(raw: Awaited<ReturnType<typeof readMail>>['mails'][number], key: string, now: Date): MailItem {
+  const mail = parseMail(raw, now);
+  return {
+    key,
+    kind: 'mail',
+    title: raw.unreadable ? '(açılamayan mail)' : mail.subject || '(konusuz)',
+    course: '',
+    url: '',
+    sender: mail.sender,
+    body: mail.body,
+    dueAt: null,
+    postedAt: mail.date ?? now.toISOString(),
+    grade: null,
+    submitted: false,
+    level: mailLevel(mail),
+    thread: threadOf(mail.headers, mail.subject),
+    // Not the Reply-To header: anyone can write there, and a reply should go to who it seems to come from.
+    replyTo: mail.from,
+    messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
+    references: mail.headers.references ?? '',
+    bulk: isBulkMail(mail),
+  };
+}
+
+async function readNewMailImap(settings: MailSettings, cursor: { uidvalidity: number; lastUid: number } | null, since: number, now: Date) {
+  const batch = await readMail({ ...account(settings, 'imap'), ...(cursor ?? {}), sinceMs: since });
+  const items = batch.mails.map((raw) => toMailItem(raw, `mail:${batch.uidvalidity}:${raw.uid}`, now));
+  return { items, cursor: { protocol: 'imap' as const, uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
+}
+
+async function readNewMailPop3(settings: MailSettings, lastItemId: number | null, now: Date) {
+  const batch = await readMail({ ...account(settings, 'pop3'), lastUid: lastItemId ?? undefined, sinceMs: 0 });
+  const items = batch.mails.map((raw) => toMailItem(raw, `mail:pop3:${raw.uid}`, now));
+  return { items, cursor: { protocol: 'pop3' as const, lastItemId: batch.lastUid } };
+}
+
+/**
+ * `mode`: `'auto'` (default) tries IMAP first and only falls back to POP3 if IMAP itself fails this round —
+ * never on a wrong password, which POP3 would refuse the same way. `'pop3'` is the manual override, or IMAP
+ * already known to be down. Crossing from a POP3 cursor back to IMAP passes no cursor at all, which the
+ * native side already reads as "search since the first-run window" — so nothing in between is missed, and
+ * duplicates against what POP3 already delivered are caught by the Message-ID check in `watcher.ts`.
+ */
 export async function readNewMail(
-  settings: MailSettings, cursor: MailCursor | null, now: Date,
+  settings: MailSettings, cursor: MailCursor | null, now: Date, mode: 'auto' | 'pop3' = 'auto',
 ): Promise<{ items: MailItem[]; cursor: MailCursor }> {
   const since = now.getTime() - FIRST_RUN_DAYS * 864e5;
-  let batch;
+  if (mode === 'auto') {
+    try {
+      return await readNewMailImap(settings, cursor && cursor.protocol === 'imap' ? cursor : null, since, now);
+    } catch (error) {
+      const converted = refused(error);
+      if (converted instanceof ImapAuthError) throw converted; // a wrong password: POP3 would refuse it too
+    }
+  }
   try {
-    batch = await readMail({ ...account(settings), ...(cursor ?? {}), sinceMs: since });
+    return await readNewMailPop3(settings, cursor && cursor.protocol === 'pop3' ? cursor.lastItemId : null, now);
   } catch (error) {
     throw refused(error);
   }
-  const items = batch.mails.map((raw) => {
-    const mail = parseMail(raw, now);
-    return {
-      key: `mail:${batch.uidvalidity}:${raw.uid}`,
-      kind: 'mail',
-      title: raw.unreadable ? '(açılamayan mail)' : mail.subject || '(konusuz)',
-      course: '',
-      url: '',
-      sender: mail.sender,
-      body: mail.body,
-      dueAt: null,
-      postedAt: mail.date ?? now.toISOString(),
-      grade: null,
-      submitted: false,
-      level: mailLevel(mail),
-      thread: threadOf(mail.headers, mail.subject),
-      // Not the Reply-To header: anyone can write there, and a reply should go to who it seems to come from.
-      replyTo: mail.from,
-      messageId: mail.headers['message-id']?.match(/<[^<>\s]+>/)?.[0] ?? '',
-      references: mail.headers.references ?? '',
-      bulk: isBulkMail(mail),
-    };
-  });
-  return { items, cursor: { uidvalidity: batch.uidvalidity, lastUid: batch.lastUid } };
 }
 
-/** The student's own mails, so a conversation shows both sides. A mailbox with no Sent folder just has none. */
-export async function readSentMail(settings: MailSettings, cursor: MailCursor | null, now: Date): Promise<{ items: MailItem[]; cursor: MailCursor } | null> {
+/** The student's own mails, so a conversation shows both sides. A mailbox with no Sent folder just has none —
+ * and POP3 has no folder concept at all, so a forced POP3 mode is the same as "no Sent folder". */
+export async function readSentMail(
+  settings: MailSettings, cursor: { uidvalidity: number; lastUid: number } | null, now: Date, mode: 'auto' | 'pop3' = 'auto',
+): Promise<{ items: MailItem[]; cursor: { uidvalidity: number; lastUid: number } } | null> {
+  if (mode === 'pop3') return null;
   let batch;
   try {
-    batch = await readMail({ ...account(settings), ...(cursor ?? {}), sinceMs: now.getTime() - FIRST_RUN_DAYS * 864e5, sent: true });
+    batch = await readMail({ ...account(settings, 'imap'), ...(cursor ?? {}), sinceMs: now.getTime() - FIRST_RUN_DAYS * 864e5, sent: true });
   } catch {
     return null; // only the other half of a conversation: the inbox goes on without it
   }

@@ -16,7 +16,7 @@ from . import exams
 from .canvas import CanvasAuthError, CanvasClient, CanvasError
 from .config import Settings
 from .docparse import read_here
-from .mailbox import Cursor, Mailbox
+from .mailbox import Mailbox, Pop3Cursor, decode_cursor, encode_cursor
 from .models import CRITICAL, HIGH, Item
 from .notify import format_time
 from .spam import score_mail
@@ -99,8 +99,11 @@ def ingest(store: Store, settings: Settings, items: list[Item], now: datetime, b
     spam_on = store.get_meta("spam_filter_enabled") != "0"
     known_senders = store.mail_senders() if spam_on and any(item.kind == "mail" for item in items) else set()
     for item in items:
+        # A mail protocol switch (IMAP <-> POP3 fallback) keys the same mail differently, so it can look like
+        # a brand-new item here under its new key even though it was already seen and reported once.
+        reappeared = item.kind == "mail" and bool(item.message_id) and store.get_item(item.key) is None and store.has_message_id(item.message_id)
         for change in store.upsert(item, now):
-            if not baseline:
+            if not baseline and not (reappeared and change.type == "new"):
                 record_change(store, settings, item, change, now)
                 count += 1
         if spam_on and item.kind == "mail":
@@ -111,13 +114,13 @@ def ingest(store: Store, settings: Settings, items: list[Item], now: datetime, b
     return count
 
 
-def keep_sent(store: Store, mailbox: Mailbox, now: datetime) -> None:
+def keep_sent(store: Store, mailbox: Mailbox, now: datetime, mode: str) -> None:
     """The student's own mails join their conversations, read and silent, as on the phone. Only the other
     half of each conversation, so a failure here is logged and never counts against the mail source."""
     raw = store.get_meta("sent_cursor")
-    cursor = Cursor(*map(int, raw.split(":"))) if raw else None
+    cursor = decode_cursor(raw) if raw else None
     try:
-        found = mailbox.fetch_sent(cursor, now - timedelta(days=MAIL_HISTORY_DAYS))
+        found = mailbox.fetch_sent(cursor, now - timedelta(days=MAIL_HISTORY_DAYS), mode=mode)
     except Exception:  # noqa: BLE001 - imaplib raises many unrelated types
         log.warning("Sent folder not read", exc_info=True)
         return
@@ -130,7 +133,7 @@ def keep_sent(store: Store, mailbox: Mailbox, now: datetime) -> None:
             continue
         store.upsert(item, now)
         store.add_quiet_event(item.key, f"Mail: {item.title}", f"Kime: {item.reply_to}", item.posted_at or now)
-    store.set_meta("sent_cursor", f"{new_cursor.uidvalidity}:{new_cursor.last_uid}")
+    store.set_meta("sent_cursor", encode_cursor(new_cursor))
 
 
 def poll_canvas(canvas: CanvasClient, now: datetime, gradebook: list[dict] | None = None) -> list[Item]:
@@ -289,21 +292,24 @@ def run_poll(
 
     if mailbox is not None:
         raw = store.get_meta("mail_cursor")
-        cursor = Cursor(*map(int, raw.split(":"))) if raw else None
+        cursor = decode_cursor(raw) if raw else None
+        mode = store.get_meta("mail_protocol") or "auto"
+        since = now - timedelta(days=MAIL_HISTORY_DAYS)
         try:
             if cursor is None:
-                items, new_cursor = mailbox.fetch_recent(now - timedelta(days=MAIL_HISTORY_DAYS))
+                items, new_cursor = mailbox.fetch_recent(since, mode=mode)
             else:
-                items, new_cursor = mailbox.fetch_new(cursor)
+                items, new_cursor = mailbox.fetch_new(cursor, mode=mode, since=since)
         except Exception as error:  # noqa: BLE001 - imaplib raises many unrelated types
             record_failure(store, "Mail", error, now)
             result.errors.append(str(error))
         else:
             result.events += ingest(store, settings, items, now, baseline=cursor is None)
             result.items += len(items)
-            store.set_meta("mail_cursor", f"{new_cursor.uidvalidity}:{new_cursor.last_uid}")
+            store.set_meta("mail_cursor", encode_cursor(new_cursor))
+            store.set_meta("mail_protocol_active", "pop3" if isinstance(new_cursor, Pop3Cursor) else "imap")
             clear_failure(store, "Mail")
-            keep_sent(store, mailbox, now)
+            keep_sent(store, mailbox, now, mode)
 
     result.events += add_reminders(store, settings, now)
     result.events += fire_user_reminders(store, now)

@@ -43,15 +43,18 @@ class FakeMailbox:
         self.error = error
         self.cursors: list[Cursor] = []
         self.since: list[datetime] = []
+        self.modes: list[str] = []
 
-    def fetch_recent(self, since):
+    def fetch_recent(self, since, mode="auto"):
         self.since.append(since)
+        self.modes.append(mode)
         if self.error:
             raise self.error
         return self.recent, Cursor(5, 100)
 
-    def fetch_new(self, cursor):
+    def fetch_new(self, cursor, mode="auto", since=None):
         self.cursors.append(cursor)
+        self.modes.append(mode)
         if self.error:
             raise self.error
         return self.items, Cursor(5, cursor.last_uid + len(self.items))
@@ -189,6 +192,26 @@ def test_mail_level_decides_the_event_level(store, settings):
     box.items = [Item(key="mail:5:101", kind="mail", title="Bülten", level=LOW)]
     run_poll(store, settings, None, box, NOW)
     assert [e.level for e in events(store)] == [LOW]
+
+
+def test_mail_protocol_setting_is_passed_to_the_mailbox(store, settings):
+    store.set_meta("mail_protocol", "pop3")
+    box = FakeMailbox()
+    run_poll(store, settings, None, box, NOW)
+    assert box.modes == ["pop3"]
+
+
+def test_mail_seen_again_under_a_different_protocol_key_is_not_renotified(store, settings):
+    """A fallback between IMAP and POP3 keys the same mail differently (mail:5:101 vs mail:pop3:9001): it
+    must not look like a second, brand-new mail and fire a duplicate notification."""
+    box = FakeMailbox()
+    run_poll(store, settings, None, box, NOW)  # sets the cursor quietly
+    box.items = [Item(key="mail:5:101", kind="mail", title="Vize", level=HIGH, message_id="<a@uni.example.edu>")]
+    run_poll(store, settings, None, box, NOW)
+    assert [e.type for e in events(store)] == ["new"]
+    box.items = [Item(key="mail:pop3:9001", kind="mail", title="Vize", level=HIGH, message_id="<a@uni.example.edu>")]
+    run_poll(store, settings, None, box, NOW)
+    assert [e.type for e in events(store)] == ["new"]  # still just the one
 
 
 def test_cursor_survives_between_runs(store, settings):

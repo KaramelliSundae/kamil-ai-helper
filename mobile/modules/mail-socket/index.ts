@@ -1,7 +1,8 @@
 /** The native side of phone mail, Eclipse Angus Mail: see AngusMail.kt. */
 import { requireNativeModule } from 'expo';
 
-export type MailAccount = { host: string; port: number; user: string; password: string };
+// "pop3": a manual override, or IMAP already known to be down this round (see phone/mail.ts).
+export type MailAccount = { host: string; port: number; user: string; password: string; protocol?: 'imap' | 'pop3' };
 
 export type SmtpMail = {
   host: string;
@@ -33,9 +34,11 @@ export type NativeMail = {
 
 export type MailBatch = { uidvalidity: number; lastUid: number; mails: NativeMail[] };
 
+type ReadRequest = MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number; sent?: boolean };
+
 type MailSocketModule = {
   countInbox(account: MailAccount): Promise<number>;
-  readMail(request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number; sent?: boolean }): Promise<MailBatch>;
+  readMail(request: ReadRequest): Promise<MailBatch>;
   sendMail(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }>;
 };
 
@@ -43,7 +46,7 @@ type MailSocketModule = {
 const native = () => requireNativeModule<MailSocketModule>('MailSocket');
 
 export const countInbox = (account: MailAccount) => native().countInbox(account);
-export const readMail = (request: MailAccount & { uidvalidity?: number; lastUid?: number; sinceMs: number; sent?: boolean }) => native().readMail(request);
+export const readMail = (request: ReadRequest) => native().readMail(request);
 
 /** Sends one mail, encrypted or not at all, and keeps its copy in Sent. */
 export function sendSmtp(mail: SmtpMail): Promise<{ id: string; sentCopy: boolean }> {

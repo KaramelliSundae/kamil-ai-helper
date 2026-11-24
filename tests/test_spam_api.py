@@ -88,6 +88,14 @@ def test_spam_filter_toggle_endpoint_defaults_on_and_can_be_turned_off(api_setti
     assert client.get("/v1/settings/spam-filter", headers=headers).json() == {"enabled": False}
 
 
+def test_mail_protocol_toggle_endpoint_defaults_to_auto_and_can_be_forced_to_pop3(api_settings, db):
+    client = TestClient(create_app(api_settings, FakeLlm(""), object()))
+    headers = {"Authorization": "Bearer dogru"}
+    assert client.get("/v1/settings/mail-protocol", headers=headers).json() == {"mode": "auto", "active": "imap"}
+    assert client.post("/v1/settings/mail-protocol", json={"mode": "pop3"}, headers=headers).json() == {"mode": "pop3", "active": "imap"}
+    assert client.get("/v1/settings/mail-protocol", headers=headers).json() == {"mode": "pop3", "active": "imap"}
+
+
 def test_spam_check_refines_once_and_is_cached(api_settings, db):
     db.upsert(suspicious(), NOW)
     result = score_mail(

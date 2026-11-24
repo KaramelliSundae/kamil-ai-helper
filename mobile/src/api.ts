@@ -100,6 +100,12 @@ export const api = {
     c.mode === 'phone' ? phoneApi.spamFilterSetting() : request<{ enabled: boolean }>(c, '/v1/settings/spam-filter', 'GET'),
   setSpamFilterSetting: (c: Connection, enabled: boolean) =>
     c.mode === 'phone' ? phoneApi.setSpamFilterSetting(enabled) : request<{ enabled: boolean }>(c, '/v1/settings/spam-filter', 'POST', { enabled }),
+  mailProtocolSetting: (c: Connection) =>
+    c.mode === 'phone' ? phoneApi.mailProtocolSetting() : request<{ mode: string; active: string }>(c, '/v1/settings/mail-protocol', 'GET'),
+  setMailProtocolSetting: (c: Connection, mode: 'auto' | 'pop3') =>
+    c.mode === 'phone'
+      ? phoneApi.setMailProtocolSetting(mode)
+      : request<{ mode: string; active: string }>(c, '/v1/settings/mail-protocol', 'POST', { mode }),
   spamCheck: (c: Connection, key: string) =>
     c.mode === 'phone' ? phoneApi.spamCheck(key) : request<{ score: number; reasons: string[] }>(c, '/v1/mail/spam-check', 'POST', { key }),
   setEventRead: (c: Connection, id: number, read: boolean) =>

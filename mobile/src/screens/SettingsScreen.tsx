@@ -371,7 +371,8 @@ function PhoneMailPanel({ connection }: { connection: Connection | null }) {
     setError(null);
     setMessage(null);
     try {
-      const count = await checkMailAccount({ host: host.trim(), user: user.trim(), password });
+      const { mailProtocol } = await loadPhoneSettings();
+      const count = await checkMailAccount({ host: host.trim(), user: user.trim(), password }, mailProtocol);
       await saveMailAccount(host.trim(), user.trim(), password);
       passwordState.set('');
       setPassword('');
@@ -639,6 +640,75 @@ function SpamFilterPanel({ connection }: { connection: Connection }) {
   );
 }
 
+const MAIL_PROTOCOL_EXPLAINER = [
+  'Gönderilmiş klasöründeki mailler konuşmalara eklenmez: POP3\'te klasör kavramı yok, yalnızca gelen kutusu okunur.',
+  'İlk bağlantıda ya da uzun bir araya gelince "son 14 gün" yerine "son 100 mail" alınır: POP3\'te tarihe göre süzmek her mailin başlığını tek tek açmayı gerektirir.',
+  'Bu geçici bir çözüm: kapatman gerekmez, IMAP tekrar çalışır hale gelince kendisi otomatik tercih edilmeye devam eder. Bu anahtar yalnızca IMAP çalışırken de POP3\'ü zorlamak için var.',
+].join('\n\n');
+
+/** IMAP arızalandığında otomatik POP3'e geçiş zaten her pollda kendiliğinden olur. Bu, onun üstüne, isteğe
+ * bağlı bir manuel zorlama anahtarı: IMAP çalışsa da POP3'ü kullanmaya zorlar. */
+function MailProtocolPanel({ connection }: { connection: Connection }) {
+  const colors = useMaterialColors();
+  const [mode, setMode] = useState<'auto' | 'pop3' | null>(null);
+  const [active, setActive] = useState<string>('imap');
+  const [showInfo, setShowInfo] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.mailProtocolSetting(connection).then((reply) => {
+      if (!live) return;
+      setMode(reply.mode === 'pop3' ? 'pop3' : 'auto');
+      setActive(reply.active);
+    }, () => undefined);
+    return () => { live = false; };
+  }, [connection]);
+
+  if (mode === null) return null; // an older server has no such setting
+  return (
+    <Panel>
+      <SectionTitle icon={icons.mail} title="Mail protokolü" />
+      <Text color={colors.onSurfaceVariant} style={{ typography: 'bodyMedium' }}>
+        {active === 'pop3'
+          ? 'Şu an: POP3 kullanılıyor (IMAP\'a şu an erişilemiyor). IMAP çalışır hale gelince kendisi geri döner.'
+          : 'Şu an: IMAP kullanılıyor.'}
+      </Text>
+      <Row horizontalArrangement={{ spacedBy: 12 }} verticalAlignment="center">
+        <Column modifiers={[weight(1)]}>
+          <Text color={colors.onSurface} style={{ typography: 'titleSmall' }}>POP3'ü zorla kullan</Text>
+          <Hint>IMAP çalışsa bile POP3 kullanılır. Normalde gerekmez: IMAP bozulduğunda bu zaten otomatik olur.</Hint>
+        </Column>
+        <Switch
+          value={mode === 'pop3'}
+          onCheckedChange={(on) => {
+            const next = on ? 'pop3' : 'auto';
+            setMode(next);
+            void api.setMailProtocolSetting(connection, next).then((reply) => setActive(reply.active), () => undefined);
+          }}
+        />
+      </Row>
+      <TextButton onClick={() => setShowInfo(true)}>
+        <Text>Bu ne anlama geliyor?</Text>
+      </TextButton>
+      {showInfo ? (
+        <AlertDialog onDismissRequest={() => setShowInfo(false)}>
+          <AlertDialog.Title>
+            <Text>POP3 ne kaybettirir?</Text>
+          </AlertDialog.Title>
+          <AlertDialog.Text>
+            <Text>{MAIL_PROTOCOL_EXPLAINER}</Text>
+          </AlertDialog.Text>
+          <AlertDialog.DismissButton>
+            <TextButton onClick={() => setShowInfo(false)}>
+              <Text>Anladım</Text>
+            </TextButton>
+          </AlertDialog.DismissButton>
+        </AlertDialog>
+      ) : null}
+    </Panel>
+  );
+}
+
 export function SettingsScreen({ connection, onSaved }: Props) {
   const colors = useMaterialColors();
   const [mode, setMode] = useState<'phone' | 'server'>(connection?.mode ?? 'phone');
@@ -694,6 +764,7 @@ export function SettingsScreen({ connection, onSaved }: Props) {
 
       {connection ? <SyllabusCheckPanel connection={connection} /> : null}
       {connection ? <SpamFilterPanel connection={connection} /> : null}
+      {connection ? <MailProtocolPanel connection={connection} /> : null}
       <UpdatePanel connection={connection} />
     </Column>
   );

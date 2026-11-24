@@ -47,6 +47,7 @@ class Settings:
     canvas_url: str
     imap_host: str
     imap_port: int
+    pop3_port: int
     smtp_host: str
     smtp_port: int
     mail_user: str | None
@@ -96,6 +97,8 @@ class Settings:
             canvas_url=(get("CANVAS_URL") or "").rstrip("/"),
             imap_host=get("IMAP_HOST") or "",
             imap_port=int(get("IMAP_PORT", "993")),
+            # Used only as a fallback while IMAP itself is unreachable (see ai_ders/mailbox.py).
+            pop3_port=int(get("POP3_PORT", "995")),
             smtp_host=get("SMTP_HOST") or "",
             # 465 is TLS from the first byte; anything else must manage STARTTLS (see mailsend.open_smtp).
             smtp_port=int(get("SMTP_PORT", "465")),

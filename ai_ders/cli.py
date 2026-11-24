@@ -41,7 +41,7 @@ def build_mailbox(settings: Settings) -> Mailbox | None:
         parser = SandboxedParser(settings.mail_parser)
     return Mailbox(
         settings.imap_host, settings.imap_port, settings.mail_user, settings.mail_password,
-        parser=parser, image_dir=settings.image_dir,
+        parser=parser, image_dir=settings.image_dir, pop3_port=settings.pop3_port,
     )
 
 

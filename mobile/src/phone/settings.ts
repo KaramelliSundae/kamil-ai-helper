@@ -18,6 +18,7 @@ const KEYS = {
   calendarStatus: 'phone.calendarStatus',
   syllabusCheckDays: 'phone.syllabusCheckDays',
   spamFilterEnabled: 'phone.spamFilterEnabled',
+  mailProtocol: 'phone.mailProtocol',
   mailHost: 'phone.mailHost',
   mailUser: 'phone.mailUser',
   mailPassword: 'phone.mailPassword',
@@ -29,11 +30,11 @@ export const DEFAULT_SYLLABUS_CHECK_DAYS = 7;
 
 export type PhoneSettings = {
   canvasUrl: string; canvasToken: string; provider: Provider; baseUrl: string; geminiKey: string; geminiModel: string;
-  syllabusCheckDays: number; spamFilterEnabled: boolean;
+  syllabusCheckDays: number; spamFilterEnabled: boolean; mailProtocol: 'auto' | 'pop3';
 };
 
 export async function loadPhoneSettings(): Promise<PhoneSettings> {
-  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays, provider, baseUrl, spamFilterEnabled] = await Promise.all([
+  const [canvasUrl, canvasToken, geminiKey, geminiModel, syllabusCheckDays, provider, baseUrl, spamFilterEnabled, mailProtocol] = await Promise.all([
     SecureStore.getItemAsync(KEYS.canvasUrl),
     SecureStore.getItemAsync(KEYS.canvasToken),
     SecureStore.getItemAsync(KEYS.geminiKey),
@@ -42,6 +43,7 @@ export async function loadPhoneSettings(): Promise<PhoneSettings> {
     SecureStore.getItemAsync(KEYS.provider),
     SecureStore.getItemAsync(KEYS.baseUrl),
     SecureStore.getItemAsync(KEYS.spamFilterEnabled),
+    SecureStore.getItemAsync(KEYS.mailProtocol),
   ]);
   return {
     provider: (provider as Provider | null) ?? 'gemini',
@@ -52,6 +54,7 @@ export async function loadPhoneSettings(): Promise<PhoneSettings> {
     geminiModel: geminiModel || DEFAULT_GEMINI_MODEL,
     syllabusCheckDays: syllabusCheckDays === null ? DEFAULT_SYLLABUS_CHECK_DAYS : Number(syllabusCheckDays),
     spamFilterEnabled: spamFilterEnabled !== '0',
+    mailProtocol: mailProtocol === 'pop3' ? 'pop3' : 'auto',
   };
 }
 
@@ -59,7 +62,11 @@ export async function saveSpamFilterEnabled(enabled: boolean): Promise<void> {
   await SecureStore.setItemAsync(KEYS.spamFilterEnabled, enabled ? '1' : '0');
 }
 
-export async function savePhoneSettings(settings: Omit<PhoneSettings, 'syllabusCheckDays' | 'spamFilterEnabled'>): Promise<void> {
+export async function saveMailProtocol(mode: 'auto' | 'pop3'): Promise<void> {
+  await SecureStore.setItemAsync(KEYS.mailProtocol, mode);
+}
+
+export async function savePhoneSettings(settings: Omit<PhoneSettings, 'syllabusCheckDays' | 'spamFilterEnabled' | 'mailProtocol'>): Promise<void> {
   await SecureStore.setItemAsync(KEYS.canvasUrl, settings.canvasUrl);
   await SecureStore.setItemAsync(KEYS.canvasToken, settings.canvasToken);
   await SecureStore.setItemAsync(KEYS.geminiKey, settings.geminiKey);

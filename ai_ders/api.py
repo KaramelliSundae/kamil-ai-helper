@@ -116,6 +116,10 @@ class SpamFilterRequest(BaseModel):
     enabled: bool
 
 
+class MailProtocolRequest(BaseModel):
+    mode: Literal["auto", "pop3"]
+
+
 class SpamCheckRequest(TaskKey):
     pass
 
@@ -369,6 +373,16 @@ def create_app(
     def set_spam_filter(request: SpamFilterRequest, store: Db) -> dict[str, bool]:
         store.set_meta("spam_filter_enabled", "1" if request.enabled else "0")
         return {"enabled": request.enabled}
+
+    @app.get("/v1/settings/mail-protocol", dependencies=guarded)
+    def mail_protocol_setting(store: Db) -> dict[str, str]:
+        mode = store.get_meta("mail_protocol") or "auto"
+        return {"mode": mode, "active": store.get_meta("mail_protocol_active") or "imap"}
+
+    @app.post("/v1/settings/mail-protocol", dependencies=guarded)
+    def set_mail_protocol(request: MailProtocolRequest, store: Db) -> dict[str, str]:
+        store.set_meta("mail_protocol", request.mode)
+        return {"mode": request.mode, "active": store.get_meta("mail_protocol_active") or "imap"}
 
     @app.post("/v1/mail/spam-check", dependencies=guarded)
     def spam_check(request: SpamCheckRequest, store: Db) -> dict[str, Any]:

@@ -27,6 +27,7 @@ import jakarta.mail.Transport
 import jakarta.mail.internet.InternetAddress
 import jakarta.mail.internet.MimeMessage
 import org.eclipse.angus.mail.imap.IMAPFolder
+import org.eclipse.angus.mail.pop3.POP3Folder
 import java.io.ByteArrayInputStream
 import java.nio.charset.Charset
 import java.util.Date
@@ -53,6 +54,8 @@ class MailAccount : Record {
   @Field var port: Int = 993
   @Field var user: String = ""
   @Field var password: String = ""
+  // "imap" or "pop3": a manual override, or IMAP already known to be down this round. See readMailPop3 below.
+  @Field var protocol: String = "imap"
 }
 
 class ReadRequest : Record {
@@ -64,6 +67,7 @@ class ReadRequest : Record {
   @Field var lastUid: Double? = null
   @Field var sinceMs: Double = 0.0
   @Field var sent: Boolean = false
+  @Field var protocol: String = "imap"
 }
 
 class OutgoingMail : Record {
@@ -238,7 +242,8 @@ private fun <T> inbox(host: String, port: Int, user: String, password: String, s
 }
 
 fun countInbox(account: MailAccount): Int =
-  inbox(account.host, account.port, account.user, account.password) { folder, _ -> folder.messageCount }
+  if (account.protocol == "pop3") countInboxPop3(account)
+  else inbox(account.host, account.port, account.user, account.password) { folder, _ -> folder.messageCount }
 
 private class Found {
   var plain = ""
@@ -296,12 +301,88 @@ private fun parsed(uid: Long, raw: ByteArrayInputStream?, session: Session): Map
   }
 }
 
+// ---- POP3 fallback, used only while IMAP is unreachable (or a manual override). The numeric prefix of a
+// UIDL (e.g. the 3469 in "3469.CHyBBD...") was confirmed stable across sessions and strictly increasing
+// with arrival order on the school's server, so it is tracked exactly like an IMAP UID — see ai_ders/mailbox.py
+// for the server-side counterpart, where this was verified against the real account.
+
+private fun <T> pop3Inbox(host: String, port: Int, user: String, password: String, work: (POP3Folder) -> T): T {
+  val session = session(host, port, "mail.pop3s")
+  val store = session.getStore("pop3s")
+  try {
+    store.connect(user, password)
+    val folder = store.getFolder("INBOX") as POP3Folder
+    folder.open(Folder.READ_ONLY)
+    try {
+      return work(folder)
+    } finally {
+      runCatching { folder.close(false) }
+    }
+  } catch (error: MessagingException) {
+    throw refusal(error)
+  } finally {
+    runCatching { store.close() }
+  }
+}
+
+fun countInboxPop3(account: MailAccount): Int =
+  pop3Inbox(account.host, account.port, account.user, account.password) { it.messageCount }
+
+private fun pop3ItemId(uidl: String): Long = uidl.substringBefore('.').toLong()
+
+/** Same shape as `parsed()`, but reads a live POP3 `Message` directly instead of IMAP's raw PEEK bytes.
+ * `skipBody`, mirroring BODY.PEEK[HEADER] on the IMAP side: JavaMail's POP3 provider reads headers with
+ * TOP (cheap) but only reads the body — a full RETR — once something actually asks for it, so a mail too
+ * big for the sandbox is read this way, from its header alone, never fetching the body at all. */
+private fun parsedFromMessage(uid: Long, message: MimeMessage, skipBody: Boolean): Map<String, Any?> {
+  val base = mapOf<String, Any?>("uid" to uid.toDouble())
+  return try {
+    val found = Found()
+    if (!skipBody) runCatching { walk(message, 0, found) }
+    val from = runCatching { message.from?.firstOrNull() as? InternetAddress }.getOrNull()
+    base + mapOf(
+      "subject" to runCatching { message.subject }.getOrNull().orEmpty(),
+      "sender" to from?.personal.orEmpty(),
+      "from" to from?.address.orEmpty(),
+      "to" to runCatching { (message.getRecipients(Message.RecipientType.TO)?.firstOrNull() as? InternetAddress)?.address }.getOrNull().orEmpty(),
+      "date" to runCatching { message.sentDate?.time?.toDouble() }.getOrNull(),
+      "plain" to found.plain,
+      "html" to found.html,
+      "attachments" to found.attachments,
+      "headers" to WANTED_HEADERS.mapNotNull { name -> runCatching { message.getHeader(name, " ") }.getOrNull()?.let { name to it } }.toMap(),
+    )
+  } catch (error: Exception) {
+    base + ("unreadable" to true)
+  }
+}
+
+/** POP3 has no folders beyond INBOX and no date search, so a cursor-less first run takes the newest
+ * `MOST_PER_ROUND` mail instead of "the last N days" — a documented limitation of the fallback, shown to
+ * the student in Settings next to the manual override. */
+private fun readMailPop3(request: ReadRequest): Map<String, Any?> =
+  pop3Inbox(request.host, request.port, request.user, request.password) { folder ->
+    val lastSeen = request.lastUid?.toLong()
+    val withIds = folder.messages.map { it to pop3ItemId(folder.getUID(it)) }
+    val ordered = withIds
+      .filter { (_, id) -> lastSeen == null || id > lastSeen }
+      .sortedBy { (_, id) -> id }
+      .let { if (lastSeen == null) it.takeLast(MOST_PER_ROUND) else it.take(MOST_PER_ROUND) }
+    val mails = ordered.map { (message, id) ->
+      val big = runCatching { message.size > MAX_MAIL_BYTES }.getOrDefault(false)
+      parsedFromMessage(id, message as MimeMessage, skipBody = big)
+    }
+    val newest = withIds.maxOfOrNull { it.second } ?: -1L
+    val lastUid = maxOf(lastSeen ?: -1L, newest)
+    mapOf("uidvalidity" to 0.0, "lastUid" to lastUid.toDouble(), "mails" to mails)
+  }
+
 /**
  * Mail newer than the cursor, oldest first. Without a cursor, all the mail since a date, which the caller stores quietly. A new UIDVALIDITY means the
  * server renumbered the folder, so old numbers mean nothing and reading goes on from the newest mail.
  */
 fun readMail(request: ReadRequest): Map<String, Any?> =
-  inbox(request.host, request.port, request.user, request.password, request.sent, mapOf("uidvalidity" to 0.0, "lastUid" to 0.0, "mails" to emptyList<Any>())) { folder, session ->
+  if (request.protocol == "pop3") readMailPop3(request)
+  else inbox(request.host, request.port, request.user, request.password, request.sent, mapOf("uidvalidity" to 0.0, "lastUid" to 0.0, "mails" to emptyList<Any>())) { folder, session ->
     val validity = folder.uidValidity
     val next = folder.uidNext
     val lastSeen = request.lastUid?.toLong()

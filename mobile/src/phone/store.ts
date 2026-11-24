@@ -8,6 +8,7 @@ import { File, Paths } from 'expo-file-system';
 import type { EventItem, GradeCourse } from '../types';
 import type { AttendanceNote } from './attendance';
 import type { FoundExam } from './exams';
+import type { MailCursor } from './imap';
 
 export type StoredItem = {
   key: string;
@@ -86,7 +87,9 @@ export type PhoneState = {
     lastPollAt?: string;
     lastError?: string;
     canvasFailures?: number;
-    mailCursor?: { uidvalidity: number; lastUid: number };
+    mailCursor?: MailCursor;
+    /** Which protocol actually served the last poll, for the Settings panel to show the true current state. */
+    mailProtocolActive?: 'imap' | 'pop3';
     /** The last two weeks went in the list once, by source. */
     backfilled?: { canvas?: boolean; mail?: boolean };
     /** The first read took every mail of its two weeks, with what conversations need. Older installs read once more. */
